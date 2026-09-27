@@ -548,22 +548,24 @@ class MainWindow(QMainWindow):
         return str((root / ".venv" / "Scripts" / "python.exe").resolve())
 
     def openai_tools_schema(self):
-        guidance = (
-            "State is the only context. Keep it under about 8K tokens, include all needed facts, "
-            "and do not assume memory between calls. Outputs are calibrated probabilities; "
-            "low confidence means uncertainty."
-        )
+        min_conf = {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+        }
+        base_note = "State-only context (max ~8K tokens, no memory). Returns probabilities plus decided/defer."
         return [
             {
                 "type": "function",
                 "function": {
                     "name": "jev_yesno",
-                    "description": f"Binary yes/no decision. {guidance}",
+                    "description": f"Binary check. {base_note}",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "state": {"type": "string"},
                             "question": {"type": "string"},
+                            "min_confidence": min_conf,
                         },
                         "required": ["state", "question"],
                     },
@@ -573,7 +575,7 @@ class MainWindow(QMainWindow):
                 "type": "function",
                 "function": {
                     "name": "jev_choice",
-                    "description": f"Pick one option from a labeled set. {guidance}",
+                    "description": f"Pick one option. {base_note}",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -583,6 +585,7 @@ class MainWindow(QMainWindow):
                                 "type": "object",
                                 "additionalProperties": {"type": "string"},
                             },
+                            "min_confidence": min_conf,
                         },
                         "required": ["state", "question", "options"],
                     },
@@ -592,15 +595,32 @@ class MainWindow(QMainWindow):
                 "type": "function",
                 "function": {
                     "name": "jev_score",
-                    "description": f"Score across ordered levels from low to high. {guidance}",
+                    "description": f"Ordinal score. {base_note}",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "state": {"type": "string"},
                             "question": {"type": "string"},
                             "levels": {"type": "array", "items": {"type": "string"}},
+                            "min_confidence": min_conf,
                         },
                         "required": ["state", "question", "levels"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "jev_batch",
+                    "description": f"Many questions on one state. {base_note}",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "state": {"type": "string"},
+                            "questions": {"type": "object", "additionalProperties": True},
+                            "min_confidence": min_conf,
+                        },
+                        "required": ["state", "questions"],
                     },
                 },
             },

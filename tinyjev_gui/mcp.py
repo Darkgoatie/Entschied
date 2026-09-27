@@ -4,12 +4,6 @@ from typing import Any
 import httpx
 from mcp.server.fastmcp import FastMCP
 
-SERVER_GUIDANCE = (
-    "State is the only context TinyJev sees. Keep state under about 8K tokens, "
-    "include all facts needed for the decision, and do not rely on memory across calls. "
-    "Outputs are calibrated probabilities: treat low confidence as uncertainty."
-)
-
 mcp = FastMCP("tinyjev")
 
 
@@ -60,13 +54,7 @@ def jev_yesno(
     question: str,
     min_confidence: float | None = None,
 ) -> dict[str, Any]:
-    """Yes/no decision from TinyJev.
-
-    Use this for binary judgments. State is the only context TinyJev sees. Keep state
-    under about 8K tokens, include everything needed, and do not assume memory between
-    calls. TinyJev returns calibrated probabilities; low confidence should be treated
-    as uncertainty.
-    """
+    """Binary route/gate check. State is the only context (max ~8K tokens, no memory). Returns probabilities and decided/defer."""
 
     answers = _request_systemone(
         questions={"result": {"type": "noul", "instructions": question}},
@@ -83,13 +71,7 @@ def jev_choice(
     options: dict[str, str],
     min_confidence: float | None = None,
 ) -> dict[str, Any]:
-    """Categorical choice from TinyJev.
-
-    Provide option->description in options. State is the only context TinyJev sees.
-    Keep state under about 8K tokens, include everything needed, and do not assume
-    memory between calls. TinyJev returns calibrated probabilities; low confidence
-    means uncertain classification.
-    """
+    """Pick one option. State is the only context (max ~8K tokens, no memory). Returns option probabilities and decided/defer."""
 
     answers = _request_systemone(
         questions={
@@ -112,13 +94,7 @@ def jev_score(
     levels: list[str],
     min_confidence: float | None = None,
 ) -> dict[str, Any]:
-    """Ordinal score from TinyJev.
-
-    Provide ordered score levels from low to high. State is the only context TinyJev
-    sees. Keep state under about 8K tokens, include everything needed, and do not
-    assume memory between calls. TinyJev returns calibrated probabilities; low
-    confidence means uncertain scoring.
-    """
+    """Ordinal score. State is the only context (max ~8K tokens, no memory). Returns score probabilities and decided/defer."""
 
     answers = _request_systemone(
         questions={
@@ -140,13 +116,7 @@ def jev_batch(
     questions: dict[str, Any],
     min_confidence: float | None = None,
 ) -> dict[str, Any]:
-    """Run multiple TinyJev questions in one call on the same state.
-
-    Pass questions exactly in TinyJev API shape: each entry has type/instructions and
-    criteria for choice/score. State is the only context TinyJev sees. Keep state under
-    about 8K tokens, include everything needed, and do not assume memory between calls.
-    TinyJev outputs calibrated probabilities; treat low confidence as uncertainty.
-    """
+    """Many questions, one state. State is the only context (max ~8K tokens, no memory). Returns probabilities and decided/defer."""
 
     return _request_systemone(
         questions=questions,
