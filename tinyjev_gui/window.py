@@ -105,9 +105,11 @@ class MainWindow(QMainWindow):
         self.download_result_received = True
 
         self.host = QLineEdit(self.settings.value("host", "127.0.0.1"))
+        self.host.textChanged.connect(self.update_api_tab_content)
         self.port = QSpinBox()
         self.port.setRange(1, 65535)
         self.port.setValue(int(self.settings.value("port", 8077)))
+        self.port.valueChanged.connect(self.update_api_tab_content)
 
         self.model_combo = QComboBox()
         for entry in self.model_entries:
@@ -177,9 +179,13 @@ class MainWindow(QMainWindow):
         self.models_tab = QWidget()
         self.setup_models_tab()
 
+        self.api_tab = QWidget()
+        self.setup_api_tab()
+
         self.tabs = QTabWidget()
         self.tabs.addTab(server_tab, "Server")
         self.tabs.addTab(self.models_tab, "Models")
+        self.tabs.addTab(self.api_tab, "API")
 
         root = QWidget()
         layout = QVBoxLayout(root)
@@ -191,6 +197,7 @@ class MainWindow(QMainWindow):
         self.load_model_metadata()
         self.refresh_model_table()
         self.models_timer.start()
+        self.update_api_tab_content()
         self.update_state()
 
     def load_model_entries(self):
@@ -256,6 +263,168 @@ class MainWindow(QMainWindow):
         layout.addLayout(actions)
         layout.addWidget(self.download_info)
         layout.addWidget(self.download_bar)
+
+    def setup_api_tab(self):
+        self.api_base_url = QLineEdit()
+        self.api_base_url.setReadOnly(True)
+
+        self.api_curl = QPlainTextEdit(readOnly=True)
+        self.api_curl.setFont(QFont("Consolas", 9))
+        self.api_curl.setLineWrapMode(QPlainTextEdit.NoWrap)
+
+        self.api_tools = QPlainTextEdit(readOnly=True)
+        self.api_tools.setFont(QFont("Consolas", 9))
+        self.api_tools.setLineWrapMode(QPlainTextEdit.NoWrap)
+
+        self.api_mcp = QPlainTextEdit(readOnly=True)
+        self.api_mcp.setFont(QFont("Consolas", 9))
+        self.api_mcp.setLineWrapMode(QPlainTextEdit.NoWrap)
+
+        copy_base_btn = QPushButton("Copy")
+        copy_base_btn.clicked.connect(lambda: self.copy_api_text(self.api_base_url.text(), "Base URL copied"))
+        copy_curl_btn = QPushButton("Copy")
+        copy_curl_btn.clicked.connect(lambda: self.copy_api_text(self.api_curl.toPlainText(), "curl example copied"))
+        copy_tools_btn = QPushButton("Copy")
+        copy_tools_btn.clicked.connect(
+            lambda: self.copy_api_text(self.api_tools.toPlainText(), "OpenAI tools JSON copied")
+        )
+        copy_mcp_btn = QPushButton("Copy")
+        copy_mcp_btn.clicked.connect(lambda: self.copy_api_text(self.api_mcp.toPlainText(), "MCP config copied"))
+
+        self.api_status = QLabel("")
+
+        base_row = QHBoxLayout()
+        base_row.addWidget(QLabel("Base URL"))
+        base_row.addWidget(self.api_base_url, 1)
+        base_row.addWidget(copy_base_btn)
+
+        curl_row = QHBoxLayout()
+        curl_row.addWidget(QLabel("curl example"))
+        curl_row.addStretch(1)
+        curl_row.addWidget(copy_curl_btn)
+
+        tools_row = QHBoxLayout()
+        tools_row.addWidget(QLabel("OpenAI tool schema JSON"))
+        tools_row.addStretch(1)
+        tools_row.addWidget(copy_tools_btn)
+
+        mcp_row = QHBoxLayout()
+        mcp_row.addWidget(QLabel("MCP client config (mcpServers)"))
+        mcp_row.addStretch(1)
+        mcp_row.addWidget(copy_mcp_btn)
+
+        layout = QVBoxLayout(self.api_tab)
+        layout.addLayout(base_row)
+        layout.addLayout(curl_row)
+        layout.addWidget(self.api_curl)
+        layout.addLayout(tools_row)
+        layout.addWidget(self.api_tools)
+        layout.addLayout(mcp_row)
+        layout.addWidget(self.api_mcp)
+        layout.addWidget(self.api_status)
+
+    def copy_api_text(self, text, message):
+        QApplication.clipboard().setText(text)
+        self.api_status.setText(message)
+
+    def project_venv_python(self):
+        root = Path(__file__).resolve().parents[1]
+        return str((root / ".venv" / "Scripts" / "python.exe").resolve())
+
+    def openai_tools_schema(self):
+        guidance = (
+            "State is the only context. Keep it under about 8K tokens, include all needed facts, "
+            "and do not assume memory between calls. Outputs are calibrated probabilities; "
+            "low confidence means uncertainty."
+        )
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "jev_yesno",
+                    "description": f"Binary yes/no decision. {guidance}",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "state": {"type": "string"},
+                            "question": {"type": "string"},
+                        },
+                        "required": ["state", "question"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "jev_choice",
+                    "description": f"Pick one option from a labeled set. {guidance}",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "state": {"type": "string"},
+                            "question": {"type": "string"},
+                            "options": {
+                                "type": "object",
+                                "additionalProperties": {"type": "string"},
+                            },
+                        },
+                        "required": ["state", "question", "options"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "jev_score",
+                    "description": f"Score across ordered levels from low to high. {guidance}",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "state": {"type": "string"},
+                            "question": {"type": "string"},
+                            "levels": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "required": ["state", "question", "levels"],
+                    },
+                },
+            },
+        ]
+
+    def update_api_tab_content(self):
+        if not hasattr(self, "api_base_url"):
+            return
+
+        base_url = self.base_url()
+        self.api_base_url.setText(base_url)
+
+        curl_payload = {
+            "state": "The customer says: my package never arrived and I want my money back.",
+            "questions": {
+                "refund": {
+                    "type": "noul",
+                    "instructions": "Is this a refund request?",
+                }
+            },
+        }
+        curl_lines = [
+            f"curl -X POST {base_url}/v1/systemone \\",
+            "  -H \"Content-Type: application/json\" \\",
+            f"  -d '{json.dumps(curl_payload, indent=2)}'",
+        ]
+        self.api_curl.setPlainText("\n".join(curl_lines))
+
+        self.api_tools.setPlainText(json.dumps(self.openai_tools_schema(), indent=2))
+
+        mcp_config = {
+            "mcpServers": {
+                "tinyjev": {
+                    "command": self.project_venv_python(),
+                    "args": ["-m", "tinyjev_gui.mcp"],
+                    "env": {"TINYJEV_URL": base_url},
+                }
+            }
+        }
+        self.api_mcp.setPlainText(json.dumps(mcp_config, indent=2))
 
     def load_model_metadata(self):
         api = HfApi()

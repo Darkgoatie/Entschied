@@ -1,0 +1,103 @@
+openapi: 3.1.0
+info:
+  title: TinyJev Local API
+  version: 1.0.0
+  description: |
+    TinyJev local decision API exposed by `tinyjev.cli serve`.
+
+    Notes for callers:
+    - `state` is the only context available to the model.
+    - Keep `state` under about 8K tokens.
+    - TinyJev has no memory between requests.
+    - Outputs are calibrated probabilities; low confidence should be treated as uncertainty.
+servers:
+  - url: http://127.0.0.1:8077
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Health check
+      responses:
+        '200':
+          description: Server is reachable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /v1/systemone:
+    post:
+      operationId: runSystemOne
+      summary: Evaluate one or more TinyJev questions on a shared state
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SystemOneRequest'
+      responses:
+        '200':
+          description: Decision outputs per question key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemOneResponse'
+        '400':
+          description: Invalid request payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        ready:
+          type: boolean
+          description: True when model is loaded and ready.
+      additionalProperties: true
+    SystemOneRequest:
+      type: object
+      required: [state, questions]
+      properties:
+        state:
+          type: string
+          description: Full context text for the decision.
+        questions:
+          type: object
+          minProperties: 1
+          additionalProperties:
+            $ref: '#/components/schemas/QuestionSpec'
+    QuestionSpec:
+      type: object
+      required: [type, instructions]
+      properties:
+        type:
+          type: string
+          enum: [noul, choice, score]
+        instructions:
+          type: string
+        criteria:
+          description: Required for `choice` and `score`.
+          oneOf:
+            - type: object
+              additionalProperties:
+                type: string
+            - type: array
+              items:
+                type: string
+      additionalProperties: false
+    SystemOneResponse:
+      type: object
+      required: [answers]
+      properties:
+        answers:
+          type: object
+          description: Map from question key to model-specific result payload.
+          additionalProperties:
+            type: object
+            additionalProperties: true
+      additionalProperties: true
+    ErrorResponse:
+      type: object
+      additionalProperties: true
