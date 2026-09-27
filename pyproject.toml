@@ -1,0 +1,18 @@
+[project]
+name = "tinyjev-server-gui"
+version = "0.1.0"
+description = "Desktop app to run and test a local TinyJev server"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = ["tinyjev[torch]", "PySide6", "httpx"]
+
+[project.scripts]
+tinyjev-gui = "tinyjev_gui.app:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["tinyjev_gui"]
