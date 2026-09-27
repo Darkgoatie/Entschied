@@ -38,6 +38,32 @@ Or:
 python -m tinyjev_gui
 ```
 
+## GPU runtime (DirectML)
+
+The app can run TinyJev on AMD/Intel/NVIDIA GPUs through DirectML with a separate runtime venv.
+
+Setup options:
+
+- In the **Models** tab click **Setup GPU runtime**
+- Or run:
+
+```bash
+python -m tinyjev_gui.gpu_setup
+```
+
+This creates the runtime at:
+
+- `%LOCALAPPDATA%/TinyJev/gpu-runtime`
+
+After setup, choose **Device = GPU** in the server bar and click **Start**.
+If GPU startup fails, the app logs the error and offers to retry on CPU.
+
+You can also launch the compatible server entrypoint directly:
+
+```bash
+python -m tinyjev_gui.serve --model TinyJev-0.6B --device gpu --host 127.0.0.1 --port 8091
+```
+
 ## API
 
 The server endpoint is:

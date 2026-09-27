@@ -1,10 +1,13 @@
 import json
 import os
 import threading
+from pathlib import Path
 
 import httpx
 from huggingface_hub import HfApi, constants as hf_constants, snapshot_download
 from PySide6.QtCore import QThread, Signal
+
+from .gpu_setup import ensure_gpu_runtime
 
 
 class RequestWorker(QThread):
@@ -130,4 +133,27 @@ class DownloadWorker(QThread):
                 self.finished_model.emit(self.model_name, True, "")
             else:
                 self.finished_model.emit(self.model_name, False, str(exc))
+
+
+class GpuRuntimeSetupWorker(QThread):
+    log = Signal(str)
+    done = Signal(bool, str)
+
+    def __init__(self, runtime_dir, repo_root):
+        super().__init__()
+        self.runtime_dir = Path(runtime_dir)
+        self.repo_root = Path(repo_root)
+
+    def run(self):
+        try:
+            py = ensure_gpu_runtime(
+                runtime_dir=self.runtime_dir,
+                repo_root=self.repo_root,
+                log=lambda msg: self.log.emit(str(msg)),
+            )
+        except Exception as exc:
+            self.done.emit(False, str(exc))
+            return
+
+        self.done.emit(True, str(py))
 

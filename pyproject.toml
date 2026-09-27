@@ -10,6 +10,8 @@ dependencies = ["tinyjev[torch]", "PySide6", "httpx", "huggingface_hub", "mcp[cl
 [project.scripts]
 tinyjev-gui = "tinyjev_gui.app:main"
 tinyjev-mcp = "tinyjev_gui.mcp:main"
+tinyjev-serve = "tinyjev_gui.serve:main"
+tinyjev-gpu-setup = "tinyjev_gui.gpu_setup:main"
 
 [build-system]
 requires = ["setuptools>=68"]

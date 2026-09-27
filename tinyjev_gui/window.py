@@ -39,7 +39,8 @@ from PySide6.QtWidgets import (
 from tinyjev.registry import MODELS
 
 from .common import ModelEntry, human_size, make_item, normalize_repo_id
-from .workers import DownloadWorker, HealthWorker, RequestWorker
+from .gpu_setup import default_runtime_dir, runtime_python
+from .workers import DownloadWorker, GpuRuntimeSetupWorker, HealthWorker, RequestWorker
 
 EXAMPLES = {
     "noul": {
@@ -108,6 +109,9 @@ class MainWindow(QMainWindow):
         self.download_state = None
         self.download_result_received = True
         self.is_quitting = False
+        self.gpu_setup_worker = None
+        self.last_start_device = None
+        self.stop_requested = False
 
         self.host = QLineEdit(self.settings.value("host", "127.0.0.1"))
         self.host.textChanged.connect(self.update_api_tab_content)
@@ -124,6 +128,14 @@ class MainWindow(QMainWindow):
         if model_index >= 0:
             self.model_combo.setCurrentIndex(model_index)
         self.model_combo.currentTextChanged.connect(self.model_changed)
+
+        self.device_combo = QComboBox()
+        self.device_combo.addItems(["GPU", "CPU"])
+        saved_device = str(self.settings.value("device", "")).strip().upper()
+        if saved_device not in {"CPU", "GPU"}:
+            saved_device = "GPU" if self.gpu_runtime_exists() else "CPU"
+        self.device_combo.setCurrentText(saved_device)
+        self.device_combo.currentTextChanged.connect(self.device_changed)
 
         self.start_btn = QPushButton("Start")
         self.start_btn.clicked.connect(self.toggle_server)
@@ -146,6 +158,8 @@ class MainWindow(QMainWindow):
         top.addWidget(self.port)
         top.addWidget(QLabel("Model"))
         top.addWidget(self.model_combo)
+        top.addWidget(QLabel("Device"))
+        top.addWidget(self.device_combo)
         top.addWidget(self.start_btn)
         top.addWidget(self.status, 1)
 
@@ -244,6 +258,25 @@ class MainWindow(QMainWindow):
             return raw
         return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
+    def gpu_runtime_dir(self):
+        raw = self.settings.value("gpu_runtime_dir", str(default_runtime_dir()))
+        return Path(str(raw))
+
+    def gpu_runtime_python(self):
+        custom = str(self.settings.value("gpu_python_path", "")).strip()
+        if custom:
+            return Path(custom)
+        return runtime_python(self.gpu_runtime_dir())
+
+    def gpu_runtime_exists(self):
+        return self.gpu_runtime_python().exists()
+
+    def selected_device(self):
+        return self.device_combo.currentText().strip().lower()
+
+    def device_changed(self, text):
+        self.settings.setValue("device", str(text).strip().upper())
+
     def start_on_open_changed(self, checked):
         self.settings.setValue("start_on_open", bool(checked))
 
@@ -329,6 +362,9 @@ class MainWindow(QMainWindow):
             self.download_worker.cancel()
             self.download_worker.wait(6000)
 
+        if self.gpu_setup_worker and self.gpu_setup_worker.isRunning():
+            self.gpu_setup_worker.wait(1000)
+
         self.stop_server()
         if hasattr(self, "tray_icon"):
             self.tray_icon.hide()
@@ -368,12 +404,16 @@ class MainWindow(QMainWindow):
         self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.clicked.connect(self.refresh_model_table)
 
+        self.setup_gpu_btn = QPushButton("Setup GPU runtime")
+        self.setup_gpu_btn.clicked.connect(self.setup_gpu_runtime)
+
         actions = QHBoxLayout()
         actions.addWidget(self.download_btn)
         actions.addWidget(self.cancel_btn)
         actions.addWidget(self.delete_btn)
         actions.addWidget(self.open_folder_btn)
         actions.addWidget(self.refresh_btn)
+        actions.addWidget(self.setup_gpu_btn)
         actions.addStretch(1)
 
         self.download_info = QLabel("No active download")
@@ -387,6 +427,34 @@ class MainWindow(QMainWindow):
         layout.addLayout(actions)
         layout.addWidget(self.download_info)
         layout.addWidget(self.download_bar)
+
+    def setup_gpu_runtime(self):
+        if self.gpu_setup_worker and self.gpu_setup_worker.isRunning():
+            return
+
+        runtime_dir = self.gpu_runtime_dir()
+        repo_root = Path(__file__).resolve().parents[1]
+
+        self.setup_gpu_btn.setEnabled(False)
+        self.download_info.setText(f"Preparing GPU runtime in {runtime_dir}...")
+        self.gpu_setup_worker = GpuRuntimeSetupWorker(runtime_dir=runtime_dir, repo_root=repo_root)
+        self.gpu_setup_worker.log.connect(self.log.appendPlainText)
+        self.gpu_setup_worker.done.connect(self.gpu_runtime_setup_done)
+        self.gpu_setup_worker.finished.connect(self.gpu_runtime_setup_finished)
+        self.gpu_setup_worker.start()
+
+    def gpu_runtime_setup_done(self, ok, message):
+        if ok:
+            self.download_info.setText(f"GPU runtime ready: {message}")
+            self.log.appendPlainText(f"GPU runtime ready: {message}")
+        else:
+            self.download_info.setText("GPU runtime setup failed")
+            self.log.appendPlainText(f"GPU runtime setup failed: {message}")
+            QMessageBox.warning(self, "GPU runtime", f"GPU runtime setup failed: {message}")
+
+    def gpu_runtime_setup_finished(self):
+        self.gpu_setup_worker = None
+        self.setup_gpu_btn.setEnabled(True)
 
     def setup_api_tab(self):
         self.api_base_url = QLineEdit()
@@ -565,7 +633,9 @@ class MainWindow(QMainWindow):
 
     def model_changed(self, model_name):
         self.settings.setValue("model", model_name)
+
         self.update_state()
+
 
     def base_url(self):
         host = self.host.text().strip() or "127.0.0.1"
@@ -609,23 +679,53 @@ class MainWindow(QMainWindow):
         self.settings.setValue("port", port)
         self.settings.setValue("model", model_name)
 
+        device = self.selected_device()
+        self.settings.setValue("device", device.upper())
+        self.last_start_device = device
+
+        executable = sys.executable
+        if device == "gpu":
+            gpu_python = self.gpu_runtime_python()
+            if not gpu_python.exists():
+                message = (
+                    f"GPU runtime not found at {gpu_python}. "
+                    "Open Models tab and click Setup GPU runtime."
+                )
+                self.log.appendPlainText(message)
+                self.status.setText(message)
+                answer = QMessageBox.question(
+                    self,
+                    "GPU runtime missing",
+                    "GPU runtime is not installed yet. Open Models tab and run setup now?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes,
+                )
+                if answer == QMessageBox.Yes:
+                    self.tabs.setCurrentWidget(self.models_tab)
+                    self.setup_gpu_runtime()
+                return
+            executable = str(gpu_python)
+
+        self.stop_requested = False
         self.server_ready = False
         self.update_state()
 
         args = [
             "-u",
             "-m",
-            "tinyjev.cli",
-            "serve",
+            "tinyjev_gui.serve",
+            "--model",
             model_name,
+            "--device",
+            device,
             "--host",
             host,
             "--port",
             str(port),
         ]
 
-        self.log.appendPlainText(f"> {sys.executable} {' '.join(args)}")
-        self.proc.start(sys.executable, args)
+        self.log.appendPlainText(f"> {executable} {' '.join(args)}")
+        self.proc.start(executable, args)
         if not self.proc.waitForStarted(4000):
             self.log.appendPlainText("Failed to start server process.")
             self.update_state()
@@ -639,6 +739,7 @@ class MainWindow(QMainWindow):
             return
         self.readiness_timer.stop()
         self.server_ready = False
+        self.stop_requested = True
         self.log.appendPlainText("Stopping server...")
         self.stop_process_tree()
         self.update_state()
@@ -701,11 +802,13 @@ class MainWindow(QMainWindow):
     def update_state(self, *_):
         running = self.proc.state() != QProcess.NotRunning
         downloading = self.download_worker is not None and self.download_worker.isRunning()
+        gpu_setup_running = self.gpu_setup_worker is not None and self.gpu_setup_worker.isRunning()
 
         self.start_btn.setText("Stop" if running else "Start")
         self.host.setEnabled(not running)
         self.port.setEnabled(not running)
         self.model_combo.setEnabled(not running)
+        self.device_combo.setEnabled(not running)
 
         request_running = self.worker is not None and self.worker.isRunning()
         self.send_btn.setEnabled(running and self.server_ready and not request_running)
@@ -713,6 +816,7 @@ class MainWindow(QMainWindow):
         self.cancel_btn.setEnabled(downloading)
         self.download_btn.setEnabled(not downloading)
         self.delete_btn.setEnabled(not downloading)
+        self.setup_gpu_btn.setEnabled(not gpu_setup_running)
 
         if hasattr(self, "tray_toggle_action"):
             self.tray_toggle_action.setText("Stop server" if running else "Start server")
@@ -730,10 +834,30 @@ class MainWindow(QMainWindow):
 
     def process_finished(self, exit_code, exit_status):
         self.readiness_timer.stop()
+        was_ready = self.server_ready
         self.server_ready = False
         status_name = "normal" if exit_status == QProcess.NormalExit else "crashed"
         self.log.appendPlainText(f"Server process exited ({status_name}, code {exit_code}).")
+
+        should_offer_cpu = (
+            self.last_start_device == "gpu"
+            and not self.stop_requested
+            and not was_ready
+        )
+        self.stop_requested = False
         self.update_state()
+
+        if should_offer_cpu:
+            answer = QMessageBox.question(
+                self,
+                "GPU start failed",
+                "GPU backend failed to start. Switch to CPU and retry now?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if answer == QMessageBox.Yes:
+                self.device_combo.setCurrentText("CPU")
+                QTimer.singleShot(0, self.start_server)
 
     def process_error(self, error):
         self.log.appendPlainText(f"Process error: {error}")
