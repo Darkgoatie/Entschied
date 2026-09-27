@@ -2,7 +2,8 @@
 
 A small desktop app for running a local [TinyJev](https://huggingface.co/AnkitAI/tinyjev-0.6b) server and trying requests against it.
 
-- Start and stop the server, set host and port
+- Start and stop the server, set host and port, pick the model to serve
+- Model downloads manager (download/cancel/resume/delete/open cache folder) with status and size
 - Live server log
 - Playground for `noul` (yes/no), `choice` and `score` questions
 
