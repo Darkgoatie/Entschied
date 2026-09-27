@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -183,6 +184,28 @@ class MainWindow(QMainWindow):
         self.criteria_in = QPlainTextEdit()
         self.criteria_in.setFont(QFont("Consolas", 9))
 
+        self.playground_cutoff_enabled = QCheckBox("Use confidence cutoff")
+        self.playground_cutoff_enabled.setChecked(self.setting_bool("playground_cutoff_enabled", False))
+        self.playground_cutoff_enabled.toggled.connect(self.playground_cutoff_toggled)
+
+        self.playground_cutoff = QDoubleSpinBox()
+        self.playground_cutoff.setRange(0.0, 1.0)
+        self.playground_cutoff.setDecimals(2)
+        self.playground_cutoff.setSingleStep(0.01)
+        self.playground_cutoff.setValue(float(self.settings.value("playground_min_confidence", 0.85)))
+        self.playground_cutoff.valueChanged.connect(self.playground_cutoff_changed)
+        self.playground_cutoff.setEnabled(self.playground_cutoff_enabled.isChecked())
+
+        cutoff_row = QHBoxLayout()
+        cutoff_row.setContentsMargins(0, 0, 0, 0)
+        cutoff_row.addWidget(self.playground_cutoff_enabled)
+        cutoff_row.addWidget(QLabel("Min confidence"))
+        cutoff_row.addWidget(self.playground_cutoff)
+        cutoff_row.addStretch(1)
+
+        cutoff_wrap = QWidget()
+        cutoff_wrap.setLayout(cutoff_row)
+
         self.send_btn = QPushButton("Send")
         self.send_btn.clicked.connect(self.send)
 
@@ -194,6 +217,7 @@ class MainWindow(QMainWindow):
         form.addRow("State", self.state_in)
         form.addRow("Instructions", self.instr_in)
         form.addRow("Criteria (JSON)", self.criteria_in)
+        form.addRow("Cutoff", cutoff_wrap)
         form.addRow("", self.send_btn)
         form.addRow("Response", self.result)
 
@@ -869,6 +893,13 @@ class MainWindow(QMainWindow):
         self.criteria_in.setPlainText(sample["criteria"])
         self.criteria_in.setEnabled(question_type != "noul")
 
+    def playground_cutoff_toggled(self, checked):
+        self.settings.setValue("playground_cutoff_enabled", bool(checked))
+        self.playground_cutoff.setEnabled(bool(checked))
+
+    def playground_cutoff_changed(self, value):
+        self.settings.setValue("playground_min_confidence", float(value))
+
     def send(self):
         if self.proc.state() == QProcess.NotRunning or not self.server_ready:
             self.result.setPlainText("Server is not ready.")
@@ -887,6 +918,8 @@ class MainWindow(QMainWindow):
                 return
 
         payload = {"state": self.state_in.toPlainText(), "questions": {"result": question}}
+        if self.playground_cutoff_enabled.isChecked():
+            payload["min_confidence"] = float(self.playground_cutoff.value())
 
         self.result.setPlainText("Waiting...")
         self.worker = RequestWorker(self.base_url() + "/v1/systemone", payload)

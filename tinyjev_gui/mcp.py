@@ -18,10 +18,16 @@ def _base_url() -> str:
     return value.rstrip("/") or "http://127.0.0.1:8077"
 
 
-def _request_systemone(questions: dict[str, Any], state: str) -> dict[str, Any]:
+def _request_systemone(
+    questions: dict[str, Any],
+    state: str,
+    min_confidence: float | None = None,
+) -> dict[str, Any]:
     base_url = _base_url()
     url = f"{base_url}/v1/systemone"
     payload = {"state": state, "questions": questions}
+    if min_confidence is not None:
+        payload["min_confidence"] = min_confidence
 
     try:
         response = httpx.post(url, json=payload, timeout=45)
@@ -49,7 +55,11 @@ def _request_systemone(questions: dict[str, Any], state: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-def jev_yesno(state: str, question: str) -> dict[str, Any]:
+def jev_yesno(
+    state: str,
+    question: str,
+    min_confidence: float | None = None,
+) -> dict[str, Any]:
     """Yes/no decision from TinyJev.
 
     Use this for binary judgments. State is the only context TinyJev sees. Keep state
@@ -61,12 +71,18 @@ def jev_yesno(state: str, question: str) -> dict[str, Any]:
     answers = _request_systemone(
         questions={"result": {"type": "noul", "instructions": question}},
         state=state,
+        min_confidence=min_confidence,
     )
     return answers["result"]
 
 
 @mcp.tool()
-def jev_choice(state: str, question: str, options: dict[str, str]) -> dict[str, Any]:
+def jev_choice(
+    state: str,
+    question: str,
+    options: dict[str, str],
+    min_confidence: float | None = None,
+) -> dict[str, Any]:
     """Categorical choice from TinyJev.
 
     Provide option->description in options. State is the only context TinyJev sees.
@@ -84,12 +100,18 @@ def jev_choice(state: str, question: str, options: dict[str, str]) -> dict[str, 
             }
         },
         state=state,
+        min_confidence=min_confidence,
     )
     return answers["result"]
 
 
 @mcp.tool()
-def jev_score(state: str, question: str, levels: list[str]) -> dict[str, Any]:
+def jev_score(
+    state: str,
+    question: str,
+    levels: list[str],
+    min_confidence: float | None = None,
+) -> dict[str, Any]:
     """Ordinal score from TinyJev.
 
     Provide ordered score levels from low to high. State is the only context TinyJev
@@ -107,12 +129,17 @@ def jev_score(state: str, question: str, levels: list[str]) -> dict[str, Any]:
             }
         },
         state=state,
+        min_confidence=min_confidence,
     )
     return answers["result"]
 
 
 @mcp.tool()
-def jev_batch(state: str, questions: dict[str, Any]) -> dict[str, Any]:
+def jev_batch(
+    state: str,
+    questions: dict[str, Any],
+    min_confidence: float | None = None,
+) -> dict[str, Any]:
     """Run multiple TinyJev questions in one call on the same state.
 
     Pass questions exactly in TinyJev API shape: each entry has type/instructions and
@@ -121,7 +148,11 @@ def jev_batch(state: str, questions: dict[str, Any]) -> dict[str, Any]:
     TinyJev outputs calibrated probabilities; treat low confidence as uncertainty.
     """
 
-    return _request_systemone(questions=questions, state=state)
+    return _request_systemone(
+        questions=questions,
+        state=state,
+        min_confidence=min_confidence,
+    )
 
 
 def main() -> None:

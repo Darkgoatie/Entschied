@@ -1,9 +1,9 @@
 openapi: 3.1.0
 info:
   title: TinyJev Local API
-  version: 1.0.0
+  version: 1.1.0
   description: |
-    TinyJev local decision API exposed by `tinyjev.cli serve`.
+    TinyJev local decision API exposed by `tinyjev_gui.serve`.
 
     Notes for callers:
     - `state` is the only context available to the model.
@@ -63,6 +63,14 @@ components:
         state:
           type: string
           description: Full context text for the decision.
+        min_confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Optional request-level confidence cutoff.
+        use_confidence_cutoff:
+          type: boolean
+          description: If true and min_confidence is omitted, applies the default 0.85 cutoff.
         questions:
           type: object
           minProperties: 1
@@ -77,6 +85,11 @@ components:
           enum: [noul, choice, score]
         instructions:
           type: string
+        min_confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Optional question-level cutoff that overrides request-level min_confidence.
         criteria:
           description: Required for `choice` and `score`.
           oneOf:
@@ -95,8 +108,67 @@ components:
           type: object
           description: Map from question key to model-specific result payload.
           additionalProperties:
-            type: object
-            additionalProperties: true
+            $ref: '#/components/schemas/Answer'
+      additionalProperties: true
+    Answer:
+      oneOf:
+        - $ref: '#/components/schemas/NoulAnswer'
+        - $ref: '#/components/schemas/ChoiceAnswer'
+        - $ref: '#/components/schemas/ScoreAnswer'
+    NoulAnswer:
+      type: object
+      required: [type, noul]
+      properties:
+        type:
+          const: noul
+        noul:
+          type: number
+        decided:
+          type: boolean
+        defer:
+          type: boolean
+      additionalProperties: true
+    ChoiceAnswer:
+      type: object
+      required: [type, choice, probabilities]
+      properties:
+        type:
+          const: choice
+        choice:
+          type: string
+        confidence:
+          type: number
+        probabilities:
+          type: object
+          additionalProperties:
+            type: number
+        decided:
+          type: boolean
+        defer:
+          type: boolean
+      additionalProperties: true
+    ScoreAnswer:
+      type: object
+      required: [type, score, probabilities]
+      properties:
+        type:
+          const: score
+        score:
+          type: number
+        confidence:
+          type: number
+        legend:
+          type: array
+          items:
+            type: string
+        probabilities:
+          type: array
+          items:
+            type: number
+        decided:
+          type: boolean
+        defer:
+          type: boolean
       additionalProperties: true
     ErrorResponse:
       type: object
