@@ -5,7 +5,7 @@ description = "Desktop app to run and test a local TinyJev server"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
-dependencies = ["tinyjev[torch]", "PySide6", "httpx"]
+dependencies = ["tinyjev[torch]", "PySide6", "httpx", "huggingface_hub"]
 
 [project.scripts]
 tinyjev-gui = "tinyjev_gui.app:main"
