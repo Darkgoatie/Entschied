@@ -12,6 +12,7 @@ from PySide6.QtCore import QProcess, QSettings, Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QFont
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QFormLayout,
     QGroupBox,
@@ -20,12 +21,15 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
     QSpinBox,
     QSplitter,
+    QStyle,
+    QSystemTrayIcon,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -103,6 +107,7 @@ class MainWindow(QMainWindow):
         self.download_worker = None
         self.download_state = None
         self.download_result_received = True
+        self.is_quitting = False
 
         self.host = QLineEdit(self.settings.value("host", "127.0.0.1"))
         self.host.textChanged.connect(self.update_api_tab_content)
@@ -124,6 +129,16 @@ class MainWindow(QMainWindow):
         self.start_btn.clicked.connect(self.toggle_server)
         self.status = QLabel()
 
+        self.start_on_open_checkbox = QCheckBox("Start server when app opens")
+        self.start_on_open_checkbox.setChecked(self.setting_bool("start_on_open", False))
+        self.start_on_open_checkbox.toggled.connect(self.start_on_open_changed)
+
+        self.start_on_login_checkbox = QCheckBox("Start app on login")
+        self.start_on_login_checkbox.setEnabled(sys.platform.startswith("win"))
+        if sys.platform.startswith("win"):
+            self.start_on_login_checkbox.setChecked(self.start_on_login_enabled())
+            self.start_on_login_checkbox.toggled.connect(self.start_on_login_changed)
+
         top = QHBoxLayout()
         top.addWidget(QLabel("Host"))
         top.addWidget(self.host)
@@ -133,6 +148,11 @@ class MainWindow(QMainWindow):
         top.addWidget(self.model_combo)
         top.addWidget(self.start_btn)
         top.addWidget(self.status, 1)
+
+        options = QHBoxLayout()
+        options.addWidget(self.start_on_open_checkbox)
+        options.addWidget(self.start_on_login_checkbox)
+        options.addStretch(1)
 
         self.log = QPlainTextEdit(readOnly=True)
         self.log.setFont(QFont("Consolas", 9))
@@ -190,6 +210,7 @@ class MainWindow(QMainWindow):
         root = QWidget()
         layout = QVBoxLayout(root)
         layout.addLayout(top)
+        layout.addLayout(options)
         layout.addWidget(self.tabs, 1)
         self.setCentralWidget(root)
 
@@ -197,8 +218,12 @@ class MainWindow(QMainWindow):
         self.load_model_metadata()
         self.refresh_model_table()
         self.models_timer.start()
+        self.setup_tray()
         self.update_api_tab_content()
         self.update_state()
+
+        if self.start_on_open_checkbox.isChecked():
+            QTimer.singleShot(0, self.start_server)
 
     def load_model_entries(self):
         entries = []
@@ -212,6 +237,105 @@ class MainWindow(QMainWindow):
                 )
             )
         return entries
+
+    def setting_bool(self, key, default=False):
+        raw = self.settings.value(key, default)
+        if isinstance(raw, bool):
+            return raw
+        return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+    def start_on_open_changed(self, checked):
+        self.settings.setValue("start_on_open", bool(checked))
+
+    def startup_command(self):
+        pythonw_path = Path(self.project_venv_python()).with_name("pythonw.exe")
+        if not pythonw_path.exists():
+            pythonw_path = Path(self.project_venv_python())
+        return f'"{pythonw_path}" -m tinyjev_gui --minimized'
+
+    def start_on_login_enabled(self):
+        if not sys.platform.startswith("win"):
+            return False
+        try:
+            import winreg
+
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\\Microsoft\\Windows\\CurrentVersion\\Run") as key:
+                value, _ = winreg.QueryValueEx(key, "TinyJevServerGUI")
+                return bool(str(value).strip())
+        except OSError:
+            return False
+
+    def set_start_on_login(self, enabled):
+        if not sys.platform.startswith("win"):
+            return False, "Start on login is only supported on Windows."
+
+        try:
+            import winreg
+
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\\Microsoft\\Windows\\CurrentVersion\\Run") as key:
+                if enabled:
+                    winreg.SetValueEx(key, "TinyJevServerGUI", 0, winreg.REG_SZ, self.startup_command())
+                else:
+                    try:
+                        winreg.DeleteValue(key, "TinyJevServerGUI")
+                    except FileNotFoundError:
+                        pass
+            return True, ""
+        except OSError as exc:
+            return False, str(exc)
+
+    def start_on_login_changed(self, checked):
+        ok, error_text = self.set_start_on_login(bool(checked))
+        if ok:
+            return
+        QMessageBox.warning(self, "Start on login", f"Failed to update login startup: {error_text}")
+        self.start_on_login_checkbox.blockSignals(True)
+        self.start_on_login_checkbox.setChecked(not checked)
+        self.start_on_login_checkbox.blockSignals(False)
+
+    def setup_tray(self):
+        tray_icon = self.windowIcon()
+        if tray_icon.isNull():
+            tray_icon = self.style().standardIcon(QStyle.SP_ComputerIcon)
+
+        self.tray_menu = QMenu(self)
+        self.tray_show_action = self.tray_menu.addAction("Show")
+        self.tray_show_action.triggered.connect(self.show_from_tray)
+        self.tray_toggle_action = self.tray_menu.addAction("Start server")
+        self.tray_toggle_action.triggered.connect(self.toggle_server)
+        self.tray_menu.addSeparator()
+        self.tray_quit_action = self.tray_menu.addAction("Quit")
+        self.tray_quit_action.triggered.connect(self.quit_from_tray)
+
+        self.tray_icon = QSystemTrayIcon(tray_icon, self)
+        self.tray_icon.setToolTip("TinyJev Server")
+        self.tray_icon.setContextMenu(self.tray_menu)
+        self.tray_icon.activated.connect(self.tray_activated)
+        self.tray_icon.show()
+
+    def tray_activated(self, reason):
+        if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
+            self.show_from_tray()
+
+    def show_from_tray(self):
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def cleanup_for_exit(self):
+        self.models_timer.stop()
+
+        if self.download_worker and self.download_worker.isRunning():
+            self.download_worker.cancel()
+            self.download_worker.wait(6000)
+
+        self.stop_server()
+        if hasattr(self, "tray_icon"):
+            self.tray_icon.hide()
+
+    def quit_from_tray(self):
+        self.is_quitting = True
+        self.close()
 
     def setup_models_tab(self):
         self.models_table = QTableWidget(0, 5)
@@ -589,6 +713,9 @@ class MainWindow(QMainWindow):
         self.cancel_btn.setEnabled(downloading)
         self.download_btn.setEnabled(not downloading)
         self.delete_btn.setEnabled(not downloading)
+
+        if hasattr(self, "tray_toggle_action"):
+            self.tray_toggle_action.setText("Stop server" if running else "Start server")
 
         if running and self.server_ready:
             self.status.setText(f"Running on {self.base_url()}")
@@ -1046,21 +1173,36 @@ class MainWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
 
     def closeEvent(self, event):
-        self.models_timer.stop()
+        if self.is_quitting:
+            self.cleanup_for_exit()
+            event.accept()
+            return
 
-        if self.download_worker and self.download_worker.isRunning():
-            self.download_worker.cancel()
-            self.download_worker.wait(6000)
+        if hasattr(self, "tray_icon") and self.tray_icon.isVisible():
+            self.hide()
+            event.ignore()
+            return
 
-        self.stop_server()
-        super().closeEvent(event)
-
+        self.is_quitting = True
+        self.cleanup_for_exit()
+        event.accept()
 
 
 def main():
-    app = QApplication(sys.argv)
+    args = list(sys.argv)
+    start_minimized = "--minimized" in args
+    if start_minimized:
+        args = [arg for arg in args if arg != "--minimized"]
+
+    app = QApplication(args)
+    app.setQuitOnLastWindowClosed(False)
+
     window = MainWindow()
-    window.show()
+    if start_minimized:
+        window.hide()
+    else:
+        window.show()
+
     sys.exit(app.exec())
 
 
