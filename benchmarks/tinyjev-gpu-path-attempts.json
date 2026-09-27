@@ -1,0 +1,9 @@
+[
+  {
+    "path": "torch-directml",
+    "works": true,
+    "error": "",
+    "load_s": 3.749,
+    "median_ms": 260.83
+  }
+]

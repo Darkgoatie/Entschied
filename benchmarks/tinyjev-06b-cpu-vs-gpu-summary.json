@@ -1,0 +1,10 @@
+{
+  "total": 42,
+  "cpu_ok": 32,
+  "gpu_ok": 32,
+  "cpu_median_ms": 301.23,
+  "gpu_median_ms": 236.77,
+  "answer_match": 42,
+  "prob_diff_le_003": 42,
+  "max_abs_probability_diff": 0.00516
+}
