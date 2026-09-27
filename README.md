@@ -1,34 +1,105 @@
 # TinyJev Server GUI
 
-A small desktop app for running a local [TinyJev](https://huggingface.co/AnkitAI/tinyjev-0.6b) server and trying requests against it.
+Desktop app for running a local [TinyJev](https://huggingface.co/AnkitAI/tinyjev-0.6b) server and exposing it to other LLMs.
 
-- Start and stop the server, set host and port, pick the model to serve
-- Model downloads manager (download/cancel/resume/delete/open cache folder) with status and size
-- Live server log
-- Playground for `noul` (yes/no), `choice` and `score` questions
+## Features
+
+- Start/stop `tinyjev.cli serve` with host/port/model controls (default port: `8077`)
+- Model manager: download/cancel/resume/delete/open cache folder
+- Correct on-disk cache size display from Hugging Face cache repo totals (with revision count note)
+- Playground for `noul` (yes/no), `choice`, and `score`
+- API tab with copyable:
+  - base URL
+  - curl example
+  - OpenAI function-calling tool schema JSON
+  - MCP client config snippet (`mcpServers`)
+- System tray mode: close window to tray, keep server running
+- Startup options:
+  - **Start server when app opens**
+  - **Start app on login** (Windows Run key, starts minimized)
 
 ## Install
 
-```
+```bash
 python -m venv .venv
 .venv\Scripts\activate
 pip install -e .
+```
+
+Run GUI:
+
+```bash
 tinyjev-gui
 ```
 
-Or run without installing: `python -m tinyjev_gui`.
+Or:
 
-The first start downloads the model weights (about 1.2 GB) from Hugging Face into the usual HF cache.
+```bash
+python -m tinyjev_gui
+```
 
 ## API
 
-The server exposes `POST /v1/systemone`:
+The server endpoint is:
+
+- `POST /v1/systemone`
+- `GET /health`
+
+OpenAPI spec is in `docs/openapi.yaml`.
+
+Example request:
 
 ```json
-{"state": "text to judge", "questions": {"result": {"type": "noul", "instructions": "Is this a refund request?"}}}
+{
+  "state": "The user wrote: my order never arrived and I want my money back.",
+  "questions": {
+    "refund": {
+      "type": "noul",
+      "instructions": "Is this a refund request?"
+    }
+  }
+}
 ```
 
-`choice` takes `criteria` as an object of option to description, `score` takes an ordered list of levels.
+`choice` uses `criteria` as an object (`option -> description`), `score` uses `criteria` as an ordered list of levels.
+
+## MCP server
+
+This repo includes a stdio MCP server entrypoint:
+
+```bash
+python -m tinyjev_gui.mcp
+```
+
+Console script (after install):
+
+```bash
+tinyjev-mcp
+```
+
+MCP tools:
+
+- `jev_yesno(state, question)`
+- `jev_choice(state, question, options)`
+- `jev_score(state, question, levels)`
+- `jev_batch(state, questions)`
+
+By default it forwards to `http://127.0.0.1:8077`. Override with:
+
+```bash
+set TINYJEV_URL=http://127.0.0.1:8077
+```
+
+Use the API tab for ready-to-copy `mcpServers` JSON (Atomic Chat / Claude Desktop / Zed style config).
+
+## Tray and login behavior
+
+- Closing the main window hides it to the system tray (server keeps running).
+- Tray menu: **Show**, **Start/Stop server**, **Quit**.
+- **Quit** stops the TinyJev server before exit.
+- On Windows, enabling **Start app on login** writes:
+  - `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\TinyJevServerGUI`
+  - command: `.venv\Scripts\pythonw.exe -m tinyjev_gui --minimized`
 
 ## License
 
