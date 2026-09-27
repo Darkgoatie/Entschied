@@ -1,0 +1,33 @@
+{
+  "cases": 73,
+  "decided": 16,
+  "deferred": 57,
+  "local_share": 0.2191780821917808,
+  "decided_accuracy": 0.9375,
+  "median_tinyjev_ms": 142.3668999923393,
+  "tokenizer": "tiktoken:o200k_base",
+  "tool_schema_tokens": 475,
+  "online_latency_measured": false,
+  "cost_per_1000_usd": {
+    "GPT-5 mini": {
+      "online_only": 0.03598972602739725,
+      "tinyjev_front": 0.027835616438356168,
+      "mcp_tool": 0.3083424657534245
+    },
+    "GPT-5.4": {
+      "online_only": 0.333595890410959,
+      "tinyjev_front": 0.25787671232876713,
+      "mcp_tool": 2.7109589041095874
+    },
+    "Claude Sonnet 5": {
+      "online_only": 0.2563561643835616,
+      "tinyjev_front": 0.1981095890410959,
+      "mcp_tool": 2.0197808219178084
+    },
+    "Claude Opus 5": {
+      "online_only": 0.6408904109589039,
+      "tinyjev_front": 0.4952739726027397,
+      "mcp_tool": 5.049452054794521
+    }
+  }
+}
