@@ -15,7 +15,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
-    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QSpinBox,
@@ -204,7 +203,7 @@ class MainWindow(QMainWindow):
         if self.is_port_busy(host, port):
             message = f"Port {port} is already in use on {host}."
             self.log.appendPlainText(message)
-            QMessageBox.warning(self, "Port in use", message)
+            self.status.setText(message)
             return
 
         self.settings.setValue("host", host)
