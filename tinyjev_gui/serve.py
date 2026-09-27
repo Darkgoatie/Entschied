@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
@@ -13,16 +14,78 @@ DEFAULT_MIN_CONFIDENCE = 0.85
 MAX_BODY = 2_000_000
 
 
+def _shutdown_agent_resources(agent) -> None:
+    if agent is None:
+        return
+
+    backbone = getattr(agent, "backbone", None)
+    shutdown = getattr(backbone, "shutdown", None)
+    if callable(shutdown):
+        try:
+            shutdown()
+        except Exception:
+            pass
+
+    handle = getattr(agent, "_llama_server_handle", None)
+    if handle is not None:
+        try:
+            handle.stop()
+        except Exception:
+            pass
+
+
 def load_agent(model_name: str, device: str):
     if device == "gpu":
         import torch_directml
         import tinyjev.backends.torch_backend as torch_backend
 
         from .gpu_backend import DirectMLQwen3Backbone
+        from .vulkan_setup import directml_allowed
+
+        allowed, size = directml_allowed(model_name)
+        if not allowed:
+            limit_gb = 5.5
+            model_gb = size / 1024**3
+            raise ValueError(
+                f"DirectML is limited to about {limit_gb:.1f} GB model files on this machine; "
+                f"{model_name} is {model_gb:.2f} GB. Use --device vulkan for this model."
+            )
 
         torch_backend.Qwen3Backbone = DirectMLQwen3Backbone
         dml_device = str(torch_directml.device())
         return tinyjev.load(model_name, backend="torch", device=dml_device)
+
+    if device == "vulkan":
+        import tinyjev.backends.torch_backend as torch_backend
+
+        from .vulkan_backend import LlamaServerHandle, VulkanQwen3Backbone
+        from .vulkan_setup import preferred_gguf
+
+        gguf_path = preferred_gguf(model_name)
+        host = os.environ.get("TINYJEV_LLAMA_HOST", "127.0.0.1")
+        port = os.environ.get("TINYJEV_LLAMA_PORT", "").strip()
+        handle = LlamaServerHandle.start(
+            model_name=model_name,
+            gguf_path=gguf_path,
+            host=host,
+            port=int(port) if port else None,
+        )
+
+        os.environ["TINYJEV_LLAMA_URL"] = handle.base_url
+        os.environ["TINYJEV_MODEL_NAME"] = model_name
+        os.environ["TINYJEV_GGUF_PATH"] = str(gguf_path)
+
+        torch_backend.Qwen3Backbone = VulkanQwen3Backbone
+
+        try:
+            agent = tinyjev.load(model_name, backend="torch", device="cpu")
+        except Exception:
+            handle.stop()
+            raise
+
+        agent._llama_server_handle = handle
+        agent._llama_gguf_path = str(gguf_path)
+        return agent
 
     return tinyjev.load(model_name, backend="torch", device="cpu")
 
@@ -222,12 +285,13 @@ def serve(agent, host: str = "127.0.0.1", port: int = 8077, min_confidence: floa
         pass
     finally:
         server.server_close()
+        _shutdown_agent_resources(agent)
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="Serve TinyJev with CPU or DirectML GPU backend")
+    parser = argparse.ArgumentParser(description="Serve TinyJev with CPU, DirectML, or Vulkan backend")
     parser.add_argument("--model", required=True)
-    parser.add_argument("--device", choices=["cpu", "gpu"], default="cpu")
+    parser.add_argument("--device", choices=["cpu", "gpu", "vulkan"], default="cpu")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8077)
     parser.add_argument(

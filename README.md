@@ -57,8 +57,8 @@ MCP is still useful for integration convenience, but token savings are usually b
 ## Features
 
 - Start/stop local server with host/port/model controls (default `8077`)
-- Device switch: CPU or DirectML GPU runtime
-- Model manager: download/cancel/delete/open cache folder
+- Device switch: CPU, GPU (DirectML), or GPU (Vulkan via llama.cpp)
+- Model manager: download/cancel/delete/open cache folder, GGUF conversion
 - Playground for `noul`, `choice`, and `score`
 - Optional confidence cutoff in playground (`decided` / `defer`)
 - API tab with copyable base URL, curl sample, tool schema JSON, MCP config snippet
@@ -88,7 +88,7 @@ python -m tinyjev_gui
 
 Setup options:
 
-- In **Models** tab, click **Setup GPU runtime**
+- In **Models** tab, click **Setup DirectML runtime**
 - Or run:
 
 ```bash
@@ -99,10 +99,29 @@ Runtime path:
 
 - `%LOCALAPPDATA%/TinyJev/gpu-runtime`
 
+DirectML is stable only for smaller checkpoints on this iGPU path. Models above ~5.5 GB (for example TinyJev-4B) are blocked in the GUI with a clear message; use Vulkan for those.
+
 Direct server entrypoint:
 
 ```bash
 python -m tinyjev_gui.serve --model TinyJev-0.6B --device gpu --host 127.0.0.1 --port 8091
+```
+
+## GPU runtime (Vulkan / llama.cpp)
+
+TinyJev Vulkan mode runs the Qwen3 backbone through `llama-server` embeddings (`--embeddings --pooling none`) and keeps the TinyJev pointer head in Python.
+
+- Preferred `llama-server` path: Atomic Chat Vulkan build (auto-detected)
+- Override executable: set `TINYJEV_LLAMA_SERVER`
+- If no local executable is found, the server downloads the official Windows Vulkan release into `%LOCALAPPDATA%/TinyJev/llama.cpp`
+- GGUF files are stored at `%LOCALAPPDATA%/TinyJev/gguf`
+
+In **Models** tab, click **Convert GGUF** after downloading model weights.
+
+Direct server entrypoint:
+
+```bash
+python -m tinyjev_gui.serve --model TinyJev-4B --device vulkan --host 127.0.0.1 --port 8096
 ```
 
 ## API

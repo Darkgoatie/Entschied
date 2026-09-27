@@ -41,7 +41,20 @@ from tinyjev.registry import MODELS
 
 from .common import ModelEntry, human_size, make_item, normalize_repo_id
 from .gpu_setup import default_runtime_dir, runtime_python
-from .workers import DownloadWorker, GpuRuntimeSetupWorker, HealthWorker, RequestWorker
+from .vulkan_setup import (
+    DIRECTML_SIZE_LIMIT_BYTES,
+    directml_allowed,
+    find_llama_server,
+    gguf_status,
+    llama_has_vulkan,
+)
+from .workers import (
+    DownloadWorker,
+    GgufConvertWorker,
+    GpuRuntimeSetupWorker,
+    HealthWorker,
+    RequestWorker,
+)
 
 EXAMPLES = {
     "noul": {
@@ -111,6 +124,7 @@ class MainWindow(QMainWindow):
         self.download_result_received = True
         self.is_quitting = False
         self.gpu_setup_worker = None
+        self.convert_worker = None
         self.last_start_device = None
         self.stop_requested = False
 
@@ -131,12 +145,11 @@ class MainWindow(QMainWindow):
         self.model_combo.currentTextChanged.connect(self.model_changed)
 
         self.device_combo = QComboBox()
-        self.device_combo.addItems(["GPU", "CPU"])
-        saved_device = str(self.settings.value("device", "")).strip().upper()
-        if saved_device not in {"CPU", "GPU"}:
-            saved_device = "GPU" if self.gpu_runtime_exists() else "CPU"
-        self.device_combo.setCurrentText(saved_device)
-        self.device_combo.currentTextChanged.connect(self.device_changed)
+        self.device_combo.addItem("CPU", "cpu")
+        self.device_combo.addItem("GPU (DirectML)", "gpu")
+        self.device_combo.addItem("GPU (Vulkan)", "vulkan")
+        self.set_selected_device(self.initial_device_key())
+        self.device_combo.currentIndexChanged.connect(self.device_changed)
 
         self.start_btn = QPushButton("Start")
         self.start_btn.clicked.connect(self.toggle_server)
@@ -295,11 +308,55 @@ class MainWindow(QMainWindow):
     def gpu_runtime_exists(self):
         return self.gpu_runtime_python().exists()
 
-    def selected_device(self):
-        return self.device_combo.currentText().strip().lower()
+    def vulkan_runtime_available(self):
+        try:
+            server = find_llama_server(auto_download=False)
+        except Exception:
+            return False
+        return llama_has_vulkan(str(server))
 
-    def device_changed(self, text):
-        self.settings.setValue("device", str(text).strip().upper())
+    def normalize_device_value(self, raw_value):
+        raw = str(raw_value or "").strip().lower()
+        aliases = {
+            "gpu": "gpu",
+            "cpu": "cpu",
+            "vulkan": "vulkan",
+            "gpu (directml)": "gpu",
+            "gpu (vulkan)": "vulkan",
+        }
+        if raw in aliases:
+            return aliases[raw]
+        upper = str(raw_value or "").strip().upper()
+        if upper in {"CPU", "GPU", "VULKAN"}:
+            return upper.lower()
+        return ""
+
+    def initial_device_key(self):
+        saved = self.normalize_device_value(self.settings.value("device", ""))
+        if saved:
+            return saved
+        if self.vulkan_runtime_available():
+            return "vulkan"
+        if self.gpu_runtime_exists():
+            return "gpu"
+        return "cpu"
+
+    def set_selected_device(self, device_key):
+        wanted = self.normalize_device_value(device_key)
+        if not wanted:
+            wanted = "cpu"
+        for idx in range(self.device_combo.count()):
+            if self.device_combo.itemData(idx) == wanted:
+                self.device_combo.setCurrentIndex(idx)
+                return
+        self.device_combo.setCurrentIndex(0)
+
+    def selected_device(self):
+        value = self.device_combo.currentData()
+        return self.normalize_device_value(value) or "cpu"
+
+    def device_changed(self, *_):
+        self.settings.setValue("device", self.selected_device())
 
     def start_on_open_changed(self, checked):
         self.settings.setValue("start_on_open", bool(checked))
@@ -389,6 +446,9 @@ class MainWindow(QMainWindow):
         if self.gpu_setup_worker and self.gpu_setup_worker.isRunning():
             self.gpu_setup_worker.wait(1000)
 
+        if self.convert_worker and self.convert_worker.isRunning():
+            self.convert_worker.wait(1000)
+
         self.stop_server()
         if hasattr(self, "tray_icon"):
             self.tray_icon.hide()
@@ -398,9 +458,9 @@ class MainWindow(QMainWindow):
         self.close()
 
     def setup_models_tab(self):
-        self.models_table = QTableWidget(0, 5)
+        self.models_table = QTableWidget(0, 6)
         self.models_table.setHorizontalHeaderLabels(
-            ["Model", "Params", "Size", "Description", "Status"]
+            ["Model", "Params", "Size", "Description", "Status", "GGUF"]
         )
         self.models_table.verticalHeader().setVisible(False)
         self.models_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -412,6 +472,7 @@ class MainWindow(QMainWindow):
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.Stretch)
         header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
 
         self.download_btn = QPushButton("Download")
         self.download_btn.clicked.connect(self.download_selected)
@@ -428,7 +489,10 @@ class MainWindow(QMainWindow):
         self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.clicked.connect(self.refresh_model_table)
 
-        self.setup_gpu_btn = QPushButton("Setup GPU runtime")
+        self.convert_btn = QPushButton("Convert GGUF")
+        self.convert_btn.clicked.connect(self.convert_selected_model)
+
+        self.setup_gpu_btn = QPushButton("Setup DirectML runtime")
         self.setup_gpu_btn.clicked.connect(self.setup_gpu_runtime)
 
         actions = QHBoxLayout()
@@ -437,6 +501,7 @@ class MainWindow(QMainWindow):
         actions.addWidget(self.delete_btn)
         actions.addWidget(self.open_folder_btn)
         actions.addWidget(self.refresh_btn)
+        actions.addWidget(self.convert_btn)
         actions.addWidget(self.setup_gpu_btn)
         actions.addStretch(1)
 
@@ -460,7 +525,7 @@ class MainWindow(QMainWindow):
         repo_root = Path(__file__).resolve().parents[1]
 
         self.setup_gpu_btn.setEnabled(False)
-        self.download_info.setText(f"Preparing GPU runtime in {runtime_dir}...")
+        self.download_info.setText(f"Preparing DirectML runtime in {runtime_dir}...")
         self.gpu_setup_worker = GpuRuntimeSetupWorker(runtime_dir=runtime_dir, repo_root=repo_root)
         self.gpu_setup_worker.log.connect(self.log.appendPlainText)
         self.gpu_setup_worker.done.connect(self.gpu_runtime_setup_done)
@@ -469,16 +534,46 @@ class MainWindow(QMainWindow):
 
     def gpu_runtime_setup_done(self, ok, message):
         if ok:
-            self.download_info.setText(f"GPU runtime ready: {message}")
-            self.log.appendPlainText(f"GPU runtime ready: {message}")
+            self.download_info.setText(f"DirectML runtime ready: {message}")
+            self.log.appendPlainText(f"DirectML runtime ready: {message}")
         else:
-            self.download_info.setText("GPU runtime setup failed")
-            self.log.appendPlainText(f"GPU runtime setup failed: {message}")
-            QMessageBox.warning(self, "GPU runtime", f"GPU runtime setup failed: {message}")
+            self.download_info.setText("DirectML runtime setup failed")
+            self.log.appendPlainText(f"DirectML runtime setup failed: {message}")
+            QMessageBox.warning(self, "DirectML runtime", f"DirectML runtime setup failed: {message}")
 
     def gpu_runtime_setup_finished(self):
         self.gpu_setup_worker = None
         self.setup_gpu_btn.setEnabled(True)
+
+    def convert_selected_model(self):
+        if self.convert_worker and self.convert_worker.isRunning():
+            return
+
+        model_name = self.current_selected_table_model() or self.selected_model_name()
+        if not model_name:
+            return
+
+        self.convert_btn.setEnabled(False)
+        self.download_info.setText(f"Converting {model_name} to GGUF...")
+        self.convert_worker = GgufConvertWorker(model_name)
+        self.convert_worker.log.connect(self.log.appendPlainText)
+        self.convert_worker.done.connect(self.convert_finished)
+        self.convert_worker.finished.connect(self.convert_thread_finished)
+        self.convert_worker.start()
+
+    def convert_finished(self, ok, message):
+        if ok:
+            self.download_info.setText("GGUF conversion complete")
+            self.log.appendPlainText(f"GGUF conversion complete: {message}")
+        else:
+            self.download_info.setText("GGUF conversion failed")
+            self.log.appendPlainText(f"GGUF conversion failed: {message}")
+            QMessageBox.warning(self, "GGUF conversion", f"Conversion failed: {message}")
+
+    def convert_thread_finished(self):
+        self.convert_worker = None
+        self.convert_btn.setEnabled(True)
+        self.refresh_model_table()
 
     def setup_api_tab(self):
         self.api_base_url = QLineEdit()
@@ -724,23 +819,35 @@ class MainWindow(QMainWindow):
         self.settings.setValue("model", model_name)
 
         device = self.selected_device()
-        self.settings.setValue("device", device.upper())
+        self.settings.setValue("device", device)
         self.last_start_device = device
 
         executable = sys.executable
         if device == "gpu":
+            allowed, size = directml_allowed(model_name)
+            if not allowed:
+                limit_gb = DIRECTML_SIZE_LIMIT_BYTES / 1024**3
+                model_gb = size / 1024**3
+                message = (
+                    f"{model_name} is {model_gb:.2f} GB, above the DirectML stability limit "
+                    f"(~{limit_gb:.1f} GB on this machine). Use GPU (Vulkan) instead."
+                )
+                self.log.appendPlainText(message)
+                self.status.setText(message)
+                return
+
             gpu_python = self.gpu_runtime_python()
             if not gpu_python.exists():
                 message = (
-                    f"GPU runtime not found at {gpu_python}. "
-                    "Open Models tab and click Setup GPU runtime."
+                    f"DirectML runtime not found at {gpu_python}. "
+                    "Open Models tab and click Setup DirectML runtime."
                 )
                 self.log.appendPlainText(message)
                 self.status.setText(message)
                 answer = QMessageBox.question(
                     self,
-                    "GPU runtime missing",
-                    "GPU runtime is not installed yet. Open Models tab and run setup now?",
+                    "DirectML runtime missing",
+                    "DirectML runtime is not installed yet. Open Models tab and run setup now?",
                     QMessageBox.Yes | QMessageBox.No,
                     QMessageBox.Yes,
                 )
@@ -749,6 +856,27 @@ class MainWindow(QMainWindow):
                     self.setup_gpu_runtime()
                 return
             executable = str(gpu_python)
+        elif device == "vulkan":
+            rows = gguf_status(model_name)
+            has_gguf = any(bool(item.get("exists")) for item in rows)
+            if not has_gguf:
+                message = (
+                    f"No GGUF found for {model_name}. Open Models tab and click Convert GGUF."
+                )
+                self.log.appendPlainText(message)
+                self.status.setText(message)
+                answer = QMessageBox.question(
+                    self,
+                    "GGUF missing",
+                    "Vulkan needs GGUF files. Open Models tab and start conversion now?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes,
+                )
+                if answer == QMessageBox.Yes:
+                    self.tabs.setCurrentWidget(self.models_tab)
+                    self.select_model_row(model_name)
+                    self.convert_selected_model()
+                return
 
         self.stop_requested = False
         self.server_ready = False
@@ -847,6 +975,7 @@ class MainWindow(QMainWindow):
         running = self.proc.state() != QProcess.NotRunning
         downloading = self.download_worker is not None and self.download_worker.isRunning()
         gpu_setup_running = self.gpu_setup_worker is not None and self.gpu_setup_worker.isRunning()
+        convert_running = self.convert_worker is not None and self.convert_worker.isRunning()
 
         self.start_btn.setText("Stop" if running else "Start")
         self.host.setEnabled(not running)
@@ -858,9 +987,10 @@ class MainWindow(QMainWindow):
         self.send_btn.setEnabled(running and self.server_ready and not request_running)
 
         self.cancel_btn.setEnabled(downloading)
-        self.download_btn.setEnabled(not downloading)
-        self.delete_btn.setEnabled(not downloading)
-        self.setup_gpu_btn.setEnabled(not gpu_setup_running)
+        self.download_btn.setEnabled(not downloading and not convert_running)
+        self.delete_btn.setEnabled(not downloading and not convert_running)
+        self.convert_btn.setEnabled(not convert_running and not downloading)
+        self.setup_gpu_btn.setEnabled(not gpu_setup_running and not convert_running)
 
         if hasattr(self, "tray_toggle_action"):
             self.tray_toggle_action.setText("Stop server" if running else "Start server")
@@ -884,7 +1014,7 @@ class MainWindow(QMainWindow):
         self.log.appendPlainText(f"Server process exited ({status_name}, code {exit_code}).")
 
         should_offer_cpu = (
-            self.last_start_device == "gpu"
+            self.last_start_device in {"gpu", "vulkan"}
             and not self.stop_requested
             and not was_ready
         )
@@ -895,12 +1025,12 @@ class MainWindow(QMainWindow):
             answer = QMessageBox.question(
                 self,
                 "GPU start failed",
-                "GPU backend failed to start. Switch to CPU and retry now?",
+                "Selected GPU backend failed to start. Switch to CPU and retry now?",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.Yes,
             )
             if answer == QMessageBox.Yes:
-                self.device_combo.setCurrentText("CPU")
+                self.set_selected_device("cpu")
                 QTimer.singleShot(0, self.start_server)
 
     def process_error(self, error):
@@ -1122,11 +1252,25 @@ class MainWindow(QMainWindow):
             self.model_status_text[entry.name] = status_text
             self.model_disk_sizes[entry.name] = disk_size
 
+            gguf_rows = gguf_status(entry.name)
+            if gguf_rows:
+                gguf_parts = []
+                for item in gguf_rows:
+                    quant = str(item.get("quant"))
+                    if item.get("exists"):
+                        gguf_parts.append(f"{quant}: {human_size(int(item.get('bytes', 0)))}")
+                    else:
+                        gguf_parts.append(f"{quant}: missing")
+                gguf_text = ", ".join(gguf_parts)
+            else:
+                gguf_text = "-"
+
             self.models_table.setItem(row, 0, make_item(entry.name))
             self.models_table.setItem(row, 1, make_item(entry.params or "-"))
             self.models_table.setItem(row, 2, make_item(size_text))
             self.models_table.setItem(row, 3, make_item(entry.description or "-"))
             self.models_table.setItem(row, 4, make_item(status_text))
+            self.models_table.setItem(row, 5, make_item(gguf_text))
 
         if selected_name:
             self.select_model_row(selected_name)

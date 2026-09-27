@@ -8,6 +8,7 @@ from huggingface_hub import HfApi, constants as hf_constants, snapshot_download
 from PySide6.QtCore import QThread, Signal
 
 from .gpu_setup import ensure_gpu_runtime
+from .vulkan_setup import convert_model_to_gguf
 
 
 class RequestWorker(QThread):
@@ -156,4 +157,23 @@ class GpuRuntimeSetupWorker(QThread):
             return
 
         self.done.emit(True, str(py))
+
+
+class GgufConvertWorker(QThread):
+    log = Signal(str)
+    done = Signal(bool, str)
+
+    def __init__(self, model_name):
+        super().__init__()
+        self.model_name = model_name
+
+    def run(self):
+        try:
+            outputs = convert_model_to_gguf(self.model_name, log=lambda msg: self.log.emit(str(msg)))
+        except Exception as exc:
+            self.done.emit(False, str(exc))
+            return
+
+        text = ", ".join(str(path) for path in outputs)
+        self.done.emit(True, text)
 
