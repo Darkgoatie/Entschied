@@ -576,6 +576,13 @@ class MainWindow(QMainWindow):
 
         self.download_state["updated_at"] = now
 
+    def revision_note(self, repo_info):
+        revisions = getattr(repo_info, "revisions", None) or []
+        revision_count = len(revisions)
+        if revision_count > 1:
+            return f" • {revision_count} revisions cached"
+        return ""
+
     def model_status_for_entry(self, entry, repo_map):
         if self.download_state and self.download_state.get("model") == entry.name:
             downloaded = self.download_state.get("downloaded", 0)
@@ -594,10 +601,8 @@ class MainWindow(QMainWindow):
         repo_info, folder = self.find_cached_repo(entry.repo_id, repo_map)
 
         if repo_info is not None:
-            main_ref = repo_info.refs.get("main")
-            main_size = int(main_ref.size_on_disk) if main_ref else 0
-            repo_size = int(repo_info.size_on_disk)
-            display_size = main_size or repo_size
+            repo_size = int(repo_info.size_on_disk or 0)
+            revision_note = self.revision_note(repo_info)
 
             expected_files = set(self.expected_files.get(entry.name, []))
             local_files = self.snapshot_file_names(repo_info)
@@ -607,9 +612,9 @@ class MainWindow(QMainWindow):
                 downloaded = bool(local_files)
 
             if downloaded:
-                return "downloaded", f"Downloaded ({human_size(display_size)})", display_size
+                return "downloaded", f"Downloaded ({human_size(repo_size)}){revision_note}", repo_size
             if repo_size > 0:
-                return "partial", f"Partial ({human_size(repo_size)})", repo_size
+                return "partial", f"Partial ({human_size(repo_size)}){revision_note}", repo_size
             return "missing", "Not downloaded", 0
 
         raw_size = self.folder_size(folder)
