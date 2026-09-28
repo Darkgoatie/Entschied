@@ -242,6 +242,11 @@ class MainWindow(QMainWindow):
         saved_threshold = float(self.settings.value("safety_threshold", DEFAULT_SAFETY_THRESHOLD))
         saved_threshold = max(0.50, min(0.99, saved_threshold))
         self.safety_threshold_enabled = QCheckBox("Safety threshold")
+        self.safety_threshold_enabled.setToolTip(
+            "Server default for every client. Answers below this confidence come back as \"unsure\"\n"
+            "with the raw pick included. Applied when the server starts; a request can override it\n"
+            "with min_confidence."
+        )
         self.safety_threshold_enabled.setChecked(self.setting_bool("safety_threshold_enabled", True))
         self.safety_threshold_enabled.toggled.connect(self.safety_threshold_toggled)
 
@@ -292,7 +297,11 @@ class MainWindow(QMainWindow):
         self.criteria_in = QPlainTextEdit()
         self.criteria_in.setFont(QFont("Consolas", 9))
 
-        self.playground_cutoff_enabled = QCheckBox("Use confidence cutoff")
+        self.playground_cutoff_enabled = QCheckBox("Override for this request")
+        self.playground_cutoff_enabled.setToolTip(
+            "Off: Playground requests use the Safety threshold from the top bar.\n"
+            "On: sends min_confidence with the request, like an API client can. Other clients are not affected."
+        )
         self.playground_cutoff_enabled.setChecked(self.setting_bool("playground_cutoff_enabled", False))
         self.playground_cutoff_enabled.toggled.connect(self.playground_cutoff_toggled)
 
@@ -311,8 +320,17 @@ class MainWindow(QMainWindow):
         cutoff_row.addWidget(self.playground_cutoff)
         cutoff_row.addStretch(1)
 
+        self.cutoff_note = QLabel()
+        self.cutoff_note.setWordWrap(True)
+        self.cutoff_note.setStyleSheet("color: #8a9a90;")
+
+        cutoff_box = QVBoxLayout()
+        cutoff_box.setContentsMargins(0, 0, 0, 0)
+        cutoff_box.addLayout(cutoff_row)
+        cutoff_box.addWidget(self.cutoff_note)
+
         cutoff_wrap = QWidget()
-        cutoff_wrap.setLayout(cutoff_row)
+        cutoff_wrap.setLayout(cutoff_box)
 
         self.send_btn = QPushButton("Send")
         self.send_btn.clicked.connect(self.send)
@@ -326,6 +344,7 @@ class MainWindow(QMainWindow):
         form.addRow("Instructions", self.instr_in)
         form.addRow("Criteria (JSON)", self.criteria_in)
         form.addRow("Cutoff", cutoff_wrap)
+        self.update_cutoff_note()
         form.addRow("", self.send_btn)
         form.addRow("Response", self.result)
 
@@ -1595,12 +1614,29 @@ class MainWindow(QMainWindow):
         self.criteria_in.setPlainText(sample["criteria"])
         self.criteria_in.setEnabled(question_type != "noul")
 
+    def update_cutoff_note(self):
+        if self.playground_cutoff_enabled.isChecked():
+            text = (
+                f"Playground requests use {self.playground_cutoff.value():.2f}. "
+                "Other clients still get the Safety threshold."
+            )
+        elif self.safety_threshold_enabled.isChecked():
+            text = (
+                f"Playground requests use the Safety threshold "
+                f"({self.safety_threshold_slider.value() / 100:.2f}) like any other client."
+            )
+        else:
+            text = "Safety threshold is off, so every answer is returned as-is."
+        self.cutoff_note.setText(text)
+
     def playground_cutoff_toggled(self, checked):
         self.settings.setValue("playground_cutoff_enabled", bool(checked))
         self.playground_cutoff.setEnabled(bool(checked))
+        self.update_cutoff_note()
 
     def playground_cutoff_changed(self, value):
         self.settings.setValue("playground_min_confidence", float(value))
+        self.update_cutoff_note()
 
     def update_safety_threshold_label(self, value):
         self.safety_threshold_value.setText(f"{float(value):.2f}")
@@ -1622,6 +1658,7 @@ class MainWindow(QMainWindow):
         self.safety_threshold_slider.setEnabled(bool(checked))
         self._note_safety_threshold_next_start()
         self.update_api_tab_content()
+        self.update_cutoff_note()
 
     def safety_threshold_changed(self, slider_value):
         value = max(0.50, min(0.99, float(slider_value) / 100.0))
@@ -1629,6 +1666,7 @@ class MainWindow(QMainWindow):
         self.settings.setValue("safety_threshold", value)
         self._note_safety_threshold_next_start()
         self.update_api_tab_content()
+        self.update_cutoff_note()
 
 
     def send(self):
