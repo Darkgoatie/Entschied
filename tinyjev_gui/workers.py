@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 import httpx
@@ -150,6 +151,8 @@ class DownloadWorker(QThread):
 
             from tqdm.auto import tqdm
 
+            window: list[tuple[float, int]] = []
+
             class ProgressTqdm(tqdm):
                 def __init__(self, *args, **kwargs):
                     kwargs["disable"] = True
@@ -161,9 +164,15 @@ class DownloadWorker(QThread):
                     before = self.n
                     result = super().update(n)
                     delta = int(self.n - before)
-                    if delta > 0:
+                    # snapshot_download also runs a "Fetching N files" bar counted in files, not bytes
+                    if delta > 0 and getattr(self, "unit", "it") == "B":
                         outer._downloaded_delta += delta
-                        rate = self.format_dict.get("rate") or 0.0
+                        now = time.monotonic()
+                        window.append((now, outer._downloaded_delta))
+                        while len(window) > 2 and now - window[0][0] > 3.0:
+                            window.pop(0)
+                        span = now - window[0][0]
+                        rate = (outer._downloaded_delta - window[0][1]) / span if span > 0.2 else 0.0
                         outer.progress.emit(
                             outer.model_name,
                             outer.initial_bytes + outer._downloaded_delta,
