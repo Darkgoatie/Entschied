@@ -29,6 +29,21 @@ def run_self_test() -> int:
             print(f"self-test import failed: {name}: {exc}", file=sys.stderr)
         return 1
 
+    if getattr(sys, "frozen", False):
+        import subprocess
+
+        from .vulkan_setup import bundled_llama_server
+
+        server = bundled_llama_server()
+        if server is None:
+            print("self-test failed: bundled llama-server.exe not found", file=sys.stderr)
+            return 1
+        result = subprocess.run([str(server), "--version"], capture_output=True, text=True, timeout=60)
+        if result.returncode != 0:
+            print(f"self-test failed: {server} --version exited {result.returncode}", file=sys.stderr)
+            return 1
+        print(f"llama-server: {server}")
+
     print("self-test ok")
     return 0
 

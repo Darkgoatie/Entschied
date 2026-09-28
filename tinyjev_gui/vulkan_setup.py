@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import shutil
 import subprocess
 import urllib.request
@@ -293,6 +294,9 @@ def directml_allowed(model_name: str, limit_bytes: int = DIRECTML_SIZE_LIMIT_BYT
 
 def bundled_llama_server() -> Path | None:
     roots = [app_root() / "llama", app_root() / "app" / "llama"]
+    bundle_dir = getattr(sys, "_MEIPASS", None)
+    if bundle_dir:
+        roots.insert(0, Path(bundle_dir) / "llama")
     for root in roots:
         direct = root / "llama-server.exe"
         if direct.exists():
