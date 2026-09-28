@@ -34,7 +34,7 @@ def _shutdown_agent_resources(agent) -> None:
             pass
 
 
-def load_agent(model_name: str, device: str):
+def load_agent(model_name: str, device: str, quant: str | None = None):
     if device == "gpu":
         import torch_directml
         import tinyjev.backends.torch_backend as torch_backend
@@ -59,9 +59,21 @@ def load_agent(model_name: str, device: str):
         import tinyjev.backends.torch_backend as torch_backend
 
         from .vulkan_backend import LlamaServerHandle, VulkanQwen3Backbone
-        from .vulkan_setup import preferred_gguf
+        from .vulkan_setup import preferred_gguf, resolve_gguf_quant, resolve_gguf_snapshot
 
-        gguf_path = preferred_gguf(model_name)
+        selected_quant = resolve_gguf_quant(model_name, quant)
+        load_source = model_name
+
+        try:
+            snapshot_root, gguf_path, selected_quant = resolve_gguf_snapshot(
+                model_name,
+                preferred_quant=selected_quant,
+                local_files_only=True,
+            )
+            load_source = str(snapshot_root)
+        except Exception:
+            gguf_path = preferred_gguf(model_name, preferred_quant=selected_quant)
+
         host = os.environ.get("TINYJEV_LLAMA_HOST", "127.0.0.1")
         port = os.environ.get("TINYJEV_LLAMA_PORT", "").strip()
         handle = LlamaServerHandle.start(
@@ -74,17 +86,19 @@ def load_agent(model_name: str, device: str):
         os.environ["TINYJEV_LLAMA_URL"] = handle.base_url
         os.environ["TINYJEV_MODEL_NAME"] = model_name
         os.environ["TINYJEV_GGUF_PATH"] = str(gguf_path)
+        os.environ["TINYJEV_GGUF_QUANT"] = selected_quant
 
         torch_backend.Qwen3Backbone = VulkanQwen3Backbone
 
         try:
-            agent = tinyjev.load(model_name, backend="torch", device="cpu")
+            agent = tinyjev.load(load_source, backend="torch", device="cpu")
         except Exception:
             handle.stop()
             raise
 
         agent._llama_server_handle = handle
         agent._llama_gguf_path = str(gguf_path)
+        agent._llama_model_root = str(load_source)
         return agent
 
     return tinyjev.load(model_name, backend="torch", device="cpu")
@@ -294,6 +308,7 @@ def main(argv=None) -> int:
     parser.add_argument("--device", choices=["cpu", "gpu", "vulkan"], default="cpu")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8077)
+    parser.add_argument("--quant", default=None)
     parser.add_argument(
         "--min-confidence",
         nargs="?",
@@ -309,7 +324,7 @@ def main(argv=None) -> int:
         if args.min_confidence is not None:
             min_confidence = _validate_min_confidence(args.min_confidence, "--min-confidence")
 
-        agent = load_agent(args.model, args.device)
+        agent = load_agent(args.model, args.device, quant=args.quant)
     except Exception as exc:
         print(f"Failed to load {args.model} on {args.device}: {type(exc).__name__}: {exc}", flush=True)
         traceback.print_exc()

@@ -6,7 +6,7 @@ import sys
 import time
 from pathlib import Path
 
-from huggingface_hub import HfApi, scan_cache_dir
+from huggingface_hub import HfApi, scan_cache_dir, try_to_load_from_cache
 from huggingface_hub.constants import HF_HUB_CACHE
 from PySide6.QtCore import QProcess, QSettings, Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QFont
@@ -43,8 +43,13 @@ from .common import ModelEntry, human_size, make_item, normalize_repo_id
 from .gpu_setup import default_runtime_dir, runtime_python
 from .vulkan_setup import (
     DIRECTML_SIZE_LIMIT_BYTES,
+    cached_gguf_bundle,
+    default_gguf_quant,
     directml_allowed,
     find_llama_server,
+    gguf_allow_patterns,
+    gguf_quants,
+    gguf_repo_id,
     gguf_status,
     llama_has_vulkan,
 )
@@ -357,6 +362,50 @@ class MainWindow(QMainWindow):
 
     def device_changed(self, *_):
         self.settings.setValue("device", self.selected_device())
+        self.update_gguf_quant_selector()
+        self.refresh_model_table()
+
+    def gguf_quant_key(self, model_name):
+        return f"gguf_quant/{model_name}"
+
+    def selected_gguf_quant(self, model_name):
+        quants = gguf_quants(model_name)
+        if not quants:
+            return default_gguf_quant(model_name)
+        saved = str(self.settings.value(self.gguf_quant_key(model_name), "")).strip()
+        if saved in quants:
+            return saved
+        preferred = default_gguf_quant(model_name)
+        if preferred in quants:
+            return preferred
+        return quants[0]
+
+    def update_gguf_quant_selector(self):
+        if not hasattr(self, "gguf_quant_combo"):
+            return
+        model_name = self.current_selected_table_model() or self.selected_model_name()
+        quants = gguf_quants(model_name)
+        selected = self.selected_gguf_quant(model_name)
+        self.gguf_quant_combo.blockSignals(True)
+        self.gguf_quant_combo.clear()
+        for quant in quants:
+            self.gguf_quant_combo.addItem(quant)
+        idx = self.gguf_quant_combo.findText(selected)
+        if idx >= 0:
+            self.gguf_quant_combo.setCurrentIndex(idx)
+        self.gguf_quant_combo.blockSignals(False)
+        self.gguf_quant_combo.setEnabled(len(quants) > 1 and self.download_worker is None)
+        self.gguf_quant_label.setEnabled(len(quants) > 1)
+
+    def gguf_quant_changed(self, quant):
+        model_name = self.current_selected_table_model() or self.selected_model_name()
+        if not model_name or not quant:
+            return
+        self.settings.setValue(self.gguf_quant_key(model_name), quant)
+        self.refresh_model_table()
+
+    def model_table_selection_changed(self):
+        self.update_gguf_quant_selector()
 
     def start_on_open_changed(self, checked):
         self.settings.setValue("start_on_open", bool(checked))
@@ -466,6 +515,7 @@ class MainWindow(QMainWindow):
         self.models_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.models_table.setSelectionMode(QTableWidget.SingleSelection)
         self.models_table.setAlternatingRowColors(True)
+        self.models_table.itemSelectionChanged.connect(self.model_table_selection_changed)
         header = self.models_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
@@ -476,6 +526,10 @@ class MainWindow(QMainWindow):
 
         self.download_btn = QPushButton("Download")
         self.download_btn.clicked.connect(self.download_selected)
+
+        self.gguf_quant_label = QLabel("GGUF quant")
+        self.gguf_quant_combo = QComboBox()
+        self.gguf_quant_combo.currentTextChanged.connect(self.gguf_quant_changed)
 
         self.cancel_btn = QPushButton("Cancel")
         self.cancel_btn.clicked.connect(self.cancel_download)
@@ -497,6 +551,8 @@ class MainWindow(QMainWindow):
 
         actions = QHBoxLayout()
         actions.addWidget(self.download_btn)
+        actions.addWidget(self.gguf_quant_label)
+        actions.addWidget(self.gguf_quant_combo)
         actions.addWidget(self.cancel_btn)
         actions.addWidget(self.delete_btn)
         actions.addWidget(self.open_folder_btn)
@@ -516,6 +572,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(actions)
         layout.addWidget(self.download_info)
         layout.addWidget(self.download_bar)
+        self.update_gguf_quant_selector()
 
     def setup_gpu_runtime(self):
         if self.gpu_setup_worker and self.gpu_setup_worker.isRunning():
@@ -772,7 +829,8 @@ class MainWindow(QMainWindow):
 
     def model_changed(self, model_name):
         self.settings.setValue("model", model_name)
-
+        self.update_gguf_quant_selector()
+        self.refresh_model_table()
         self.update_state()
 
 
@@ -822,6 +880,7 @@ class MainWindow(QMainWindow):
         self.settings.setValue("device", device)
         self.last_start_device = device
 
+        selected_quant = self.selected_gguf_quant(model_name)
         executable = sys.executable
         if device == "gpu":
             allowed, size = directml_allowed(model_name)
@@ -857,25 +916,45 @@ class MainWindow(QMainWindow):
                 return
             executable = str(gpu_python)
         elif device == "vulkan":
+            bundle = cached_gguf_bundle(model_name, selected_quant)
             rows = gguf_status(model_name)
-            has_gguf = any(bool(item.get("exists")) for item in rows)
-            if not has_gguf:
+            converted = next(
+                (
+                    row
+                    for row in rows
+                    if row.get("quant") == selected_quant and row.get("source") == "converted"
+                ),
+                None,
+            )
+            if not bool(bundle.get("ready")) and converted is None:
                 message = (
-                    f"No GGUF found for {model_name}. Open Models tab and click Convert GGUF."
+                    f"No GGUF files found for {model_name} ({selected_quant}). "
+                    "Download from GGUF repo first, or convert locally."
                 )
                 self.log.appendPlainText(message)
                 self.status.setText(message)
-                answer = QMessageBox.question(
-                    self,
-                    "GGUF missing",
-                    "Vulkan needs GGUF files. Open Models tab and start conversion now?",
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.Yes,
-                )
-                if answer == QMessageBox.Yes:
+
+                dialog = QMessageBox(self)
+                dialog.setIcon(QMessageBox.Warning)
+                dialog.setWindowTitle("GGUF missing")
+                dialog.setText("Vulkan needs GGUF files for the selected quant.")
+                download_button = dialog.addButton("Download", QMessageBox.AcceptRole)
+                convert_button = dialog.addButton("Convert", QMessageBox.ActionRole)
+                cancel_button = dialog.addButton("Cancel", QMessageBox.RejectRole)
+                dialog.setDefaultButton(download_button)
+                dialog.exec()
+
+                clicked = dialog.clickedButton()
+                if clicked == download_button:
+                    self.tabs.setCurrentWidget(self.models_tab)
+                    self.select_model_row(model_name)
+                    self.download_selected()
+                elif clicked == convert_button:
                     self.tabs.setCurrentWidget(self.models_tab)
                     self.select_model_row(model_name)
                     self.convert_selected_model()
+                else:
+                    _ = cancel_button
                 return
 
         self.stop_requested = False
@@ -895,6 +974,9 @@ class MainWindow(QMainWindow):
             "--port",
             str(port),
         ]
+
+        if device == "vulkan":
+            args.extend(["--quant", selected_quant])
 
         self.log.appendPlainText(f"> {executable} {' '.join(args)}")
         self.proc.start(executable, args)
@@ -991,6 +1073,9 @@ class MainWindow(QMainWindow):
         self.delete_btn.setEnabled(not downloading and not convert_running)
         self.convert_btn.setEnabled(not convert_running and not downloading)
         self.setup_gpu_btn.setEnabled(not gpu_setup_running and not convert_running)
+        if hasattr(self, "gguf_quant_combo"):
+            self.gguf_quant_combo.setEnabled(self.gguf_quant_combo.count() > 1 and not downloading)
+            self.gguf_quant_label.setEnabled(self.gguf_quant_combo.count() > 1)
 
         if hasattr(self, "tray_toggle_action"):
             self.tray_toggle_action.setText("Stop server" if running else "Start server")
@@ -1100,7 +1185,7 @@ class MainWindow(QMainWindow):
         if status is None:
             self.refresh_model_table()
             status = self.model_status_codes.get(model_name)
-        return status == "downloaded"
+        return status in {"downloaded", "ready"}
 
     def find_cached_repo(self, repo_id, repo_map=None):
         target = normalize_repo_id(repo_id)
@@ -1161,13 +1246,27 @@ class MainWindow(QMainWindow):
         if not self.download_state:
             return
 
-        model_name = self.download_state.get("model")
-        entry = self.model_by_name.get(model_name)
-        if entry is None:
-            return
+        repo_id = str(self.download_state.get("repo_id", "")).strip()
+        if not repo_id:
+            model_name = self.download_state.get("model")
+            entry = self.model_by_name.get(model_name)
+            if entry is None:
+                return
+            repo_id = entry.repo_id
 
-        _, folder = self.find_cached_repo(entry.repo_id, repo_map)
-        current_size = self.folder_size(folder)
+        patterns = [str(item) for item in self.download_state.get("allow_patterns", []) if item]
+        if patterns:
+            current_size = 0
+            for filename in patterns:
+                cached = try_to_load_from_cache(repo_id=repo_id, filename=filename, repo_type="model")
+                if isinstance(cached, str):
+                    path = Path(cached)
+                    if path.exists():
+                        current_size += path.stat().st_size
+        else:
+            _, folder = self.find_cached_repo(repo_id, repo_map)
+            current_size = self.folder_size(folder)
+
         previous_size = int(self.download_state.get("downloaded", 0))
         now = time.time()
         previous_time = float(self.download_state.get("updated_at", now))
@@ -1186,6 +1285,34 @@ class MainWindow(QMainWindow):
             return f" • {revision_count} revisions cached"
         return ""
 
+    def model_status_for_vulkan(self, entry):
+        quant = self.selected_gguf_quant(entry.name)
+        bundle = cached_gguf_bundle(entry.name, quant)
+        if bool(bundle.get("ready")):
+            size = int(bundle.get("bytes", 0))
+            return "downloaded", f"Downloaded ({human_size(size)})", size
+
+        rows = gguf_status(entry.name)
+        converted = next(
+            (
+                row
+                for row in rows
+                if row.get("quant") == quant and row.get("source") == "converted"
+            ),
+            None,
+        )
+        if converted is not None:
+            size = int(converted.get("bytes", 0))
+            return "ready", f"Converted ({human_size(size)})", size
+
+        found = int(bundle.get("found", 0))
+        if found > 0:
+            size = int(bundle.get("bytes", 0))
+            expected = int(bundle.get("expected", 0))
+            return "partial", f"Partial ({found}/{expected} files, {human_size(size)})", size
+
+        return "missing", "Not downloaded", 0
+
     def model_status_for_entry(self, entry, repo_map):
         if self.download_state and self.download_state.get("model") == entry.name:
             downloaded = self.download_state.get("downloaded", 0)
@@ -1200,6 +1327,9 @@ class MainWindow(QMainWindow):
                 f"({human_size(downloaded)} / {human_size(total)}){speed_part}"
             )
             return "downloading", text, downloaded
+
+        if self.selected_device() == "vulkan":
+            return self.model_status_for_vulkan(entry)
 
         repo_info, folder = self.find_cached_repo(entry.repo_id, repo_map)
 
@@ -1257,10 +1387,14 @@ class MainWindow(QMainWindow):
                 gguf_parts = []
                 for item in gguf_rows:
                     quant = str(item.get("quant"))
-                    if item.get("exists"):
-                        gguf_parts.append(f"{quant}: {human_size(int(item.get('bytes', 0)))}")
+                    source = str(item.get("source", "not_downloaded"))
+                    gguf_size_text = human_size(int(item.get("bytes", 0)))
+                    if source == "downloaded":
+                        gguf_parts.append(f"{quant}: downloaded ({gguf_size_text})")
+                    elif source == "converted":
+                        gguf_parts.append(f"{quant}: converted ({gguf_size_text})")
                     else:
-                        gguf_parts.append(f"{quant}: missing")
+                        gguf_parts.append(f"{quant}: not downloaded")
                 gguf_text = ", ".join(gguf_parts)
             else:
                 gguf_text = "-"
@@ -1286,6 +1420,7 @@ class MainWindow(QMainWindow):
             self.download_bar.setValue(0)
             self.download_info.setText("No active download")
 
+        self.update_gguf_quant_selector()
         self.update_state()
 
     def current_selected_table_model(self):
@@ -1316,14 +1451,28 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Already downloaded", f"{model_name} is already downloaded.")
             return
 
-        initial_bytes = int(self.model_disk_sizes.get(model_name, 0))
-        total_hint = int(self.expected_sizes.get(model_name, 0))
+        device = self.selected_device()
+        repo_id = entry.repo_id
+        allow_patterns = None
+        quant = None
+
+        if device == "vulkan":
+            quant = self.selected_gguf_quant(model_name)
+            repo_id = gguf_repo_id(model_name)
+            allow_patterns = gguf_allow_patterns(model_name, quant)
+            bundle = cached_gguf_bundle(model_name, quant)
+            initial_bytes = int(bundle.get("bytes", 0))
+            total_hint = 0
+        else:
+            initial_bytes = int(self.model_disk_sizes.get(model_name, 0))
+            total_hint = int(self.expected_sizes.get(model_name, 0))
 
         self.download_worker = DownloadWorker(
             model_name=model_name,
-            repo_id=entry.repo_id,
+            repo_id=repo_id,
             initial_bytes=initial_bytes,
             total_hint=total_hint,
+            allow_patterns=allow_patterns,
         )
         self.download_worker.started_model.connect(self.download_started)
         self.download_worker.progress.connect(self.download_progress)
@@ -1333,6 +1482,9 @@ class MainWindow(QMainWindow):
         self.download_result_received = False
         self.download_state = {
             "model": model_name,
+            "repo_id": repo_id,
+            "quant": quant,
+            "allow_patterns": allow_patterns or [],
             "downloaded": initial_bytes,
             "total": total_hint,
             "speed": 0.0,
@@ -1347,8 +1499,12 @@ class MainWindow(QMainWindow):
     def download_started(self, model_name, downloaded, total):
         downloaded = int(downloaded or 0)
         total = int(total or 0)
+        prior = self.download_state or {}
         self.download_state = {
             "model": model_name,
+            "repo_id": prior.get("repo_id", ""),
+            "quant": prior.get("quant"),
+            "allow_patterns": list(prior.get("allow_patterns", [])),
             "downloaded": downloaded,
             "total": total,
             "speed": 0.0,
@@ -1359,8 +1515,12 @@ class MainWindow(QMainWindow):
     def download_progress(self, model_name, downloaded, total, speed):
         downloaded = int(downloaded or 0)
         total = int(total or 0)
+        prior = self.download_state or {}
         self.download_state = {
             "model": model_name,
+            "repo_id": prior.get("repo_id", ""),
+            "quant": prior.get("quant"),
+            "allow_patterns": list(prior.get("allow_patterns", [])),
             "downloaded": downloaded,
             "total": total,
             "speed": speed,
@@ -1423,6 +1583,11 @@ class MainWindow(QMainWindow):
         self.download_bar.setValue(0)
         self.refresh_model_table()
 
+    def cache_repo_for_model(self, entry):
+        if self.selected_device() == "vulkan":
+            return gguf_repo_id(entry.name)
+        return entry.repo_id
+
     def delete_selected(self):
         model_name = self.current_selected_table_model()
         if not model_name:
@@ -1445,7 +1610,8 @@ class MainWindow(QMainWindow):
         if answer != QMessageBox.Yes:
             return
 
-        freed = self.delete_model_cache(entry.repo_id)
+        repo_id = self.cache_repo_for_model(entry)
+        freed = self.delete_model_cache(repo_id)
         self.download_info.setText(f"Deleted cache for {model_name} ({human_size(freed)} freed).")
         self.refresh_model_table()
 
@@ -1484,7 +1650,8 @@ class MainWindow(QMainWindow):
         if entry is None:
             return
 
-        repo_info, folder = self.find_cached_repo(entry.repo_id)
+        repo_id = self.cache_repo_for_model(entry)
+        repo_info, folder = self.find_cached_repo(repo_id)
         target = Path(repo_info.repo_path) if repo_info is not None else folder
 
         if not target.exists():

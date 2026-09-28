@@ -58,7 +58,7 @@ MCP is still useful for integration convenience, but token savings are usually b
 
 - Start/stop local server with host/port/model controls (default `8077`)
 - Device switch: CPU, GPU (DirectML), or GPU (Vulkan via llama.cpp)
-- Model manager: download/cancel/delete/open cache folder, GGUF conversion
+- Model manager: download/cancel/delete/open cache folder, GGUF quant selector, optional GGUF conversion
 - Playground for `noul`, `choice`, and `score`
 - Optional confidence cutoff in playground (`decided` / `defer`)
 - API tab with copyable base URL, curl sample, tool schema JSON, MCP config snippet
@@ -114,9 +114,14 @@ TinyJev Vulkan mode runs the Qwen3 backbone through `llama-server` embeddings (`
 - Preferred `llama-server` path: Atomic Chat Vulkan build (auto-detected)
 - Override executable: set `TINYJEV_LLAMA_SERVER`
 - If no local executable is found, the server downloads the official Windows Vulkan release into `%LOCALAPPDATA%/TinyJev/llama.cpp`
-- GGUF files are stored at `%LOCALAPPDATA%/TinyJev/gguf`
+- GGUF files are downloaded from:
+  - https://huggingface.co/darkgoatie/TinyJev-0.6B-GGUF
+  - https://huggingface.co/darkgoatie/TinyJev-4B-GGUF
+- Vulkan downloads pull only the selected quant plus support files (`head.safetensors`, `tinyjev.json`, `config.json`, tokenizer files, `README.md`)
+- GGUF files can also live in `TINYJEV_GGUF_DIR` when set
+- Local conversion is optional fallback only
 
-In **Models** tab, click **Convert GGUF** after downloading model weights.
+In **Models** tab, pick a GGUF quant and click **Download**. Use **Convert GGUF** only when you need a local conversion fallback.
 
 Direct server entrypoint:
 
