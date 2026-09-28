@@ -54,6 +54,15 @@ When MCP can add tokens instead of saving:
 
 MCP is still useful for integration convenience, but token savings are usually best when TinyJev is called directly by app logic first.
 
+## Connecting an agent
+
+Use the **API** tab in the GUI.
+
+- **HTTP in front of your LLM (recommended):** pick Python, JavaScript, or curl and copy the ready-to-run snippet.
+- The snippet calls `POST /v1/systemone` with one choice question and falls back to your online LLM when TinyJev returns `unsure: true`.
+- When the safety threshold is enabled, the snippet includes `min_confidence` automatically.
+- For agents that call HTTP tools directly, copy the OpenAI tool schema JSON from the same tab.
+
 ## Features
 
 - Start/stop local server with host/port/model controls (default `8077`)
@@ -62,7 +71,7 @@ MCP is still useful for integration convenience, but token savings are usually b
 - Playground for `noul`, `choice`, and `score`
 - Safety threshold slider (0.50-0.99) with persisted value and server start integration
 - Optional confidence cutoff in playground (`decided` / `defer`)
-- API tab with copyable base URL, curl sample, tool schema JSON, MCP config snippet
+- API tab with copyable base URL, HTTP snippets (Python/JavaScript/curl), and OpenAI tool schema JSON
 - System tray mode and startup options on Windows
 
 ## Install

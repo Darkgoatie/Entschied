@@ -661,28 +661,28 @@ class MainWindow(QMainWindow):
         self.api_base_url = QLineEdit()
         self.api_base_url.setReadOnly(True)
 
-        self.api_curl = QPlainTextEdit(readOnly=True)
-        self.api_curl.setFont(QFont("Consolas", 9))
-        self.api_curl.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.api_http_language = QComboBox()
+        self.api_http_language.addItems(["Python", "JavaScript", "curl"])
+        self.api_http_language.currentTextChanged.connect(self.update_api_tab_content)
+
+        self.api_http_snippet = QPlainTextEdit(readOnly=True)
+        self.api_http_snippet.setFont(QFont("Consolas", 9))
+        self.api_http_snippet.setLineWrapMode(QPlainTextEdit.NoWrap)
 
         self.api_tools = QPlainTextEdit(readOnly=True)
         self.api_tools.setFont(QFont("Consolas", 9))
         self.api_tools.setLineWrapMode(QPlainTextEdit.NoWrap)
 
-        self.api_mcp = QPlainTextEdit(readOnly=True)
-        self.api_mcp.setFont(QFont("Consolas", 9))
-        self.api_mcp.setLineWrapMode(QPlainTextEdit.NoWrap)
-
         copy_base_btn = QPushButton("Copy")
         copy_base_btn.clicked.connect(lambda: self.copy_api_text(self.api_base_url.text(), "Base URL copied"))
-        copy_curl_btn = QPushButton("Copy")
-        copy_curl_btn.clicked.connect(lambda: self.copy_api_text(self.api_curl.toPlainText(), "curl example copied"))
+        copy_http_btn = QPushButton("Copy")
+        copy_http_btn.clicked.connect(
+            lambda: self.copy_api_text(self.api_http_snippet.toPlainText(), "HTTP snippet copied")
+        )
         copy_tools_btn = QPushButton("Copy")
         copy_tools_btn.clicked.connect(
             lambda: self.copy_api_text(self.api_tools.toPlainText(), "OpenAI tools JSON copied")
         )
-        copy_mcp_btn = QPushButton("Copy")
-        copy_mcp_btn.clicked.connect(lambda: self.copy_api_text(self.api_mcp.toPlainText(), "MCP config copied"))
 
         self.api_status = QLabel("")
 
@@ -691,29 +691,31 @@ class MainWindow(QMainWindow):
         base_row.addWidget(self.api_base_url, 1)
         base_row.addWidget(copy_base_btn)
 
-        curl_row = QHBoxLayout()
-        curl_row.addWidget(QLabel("curl example"))
-        curl_row.addStretch(1)
-        curl_row.addWidget(copy_curl_btn)
+        http_group = QGroupBox("HTTP in front of your LLM (saves tokens)")
+        http_layout = QVBoxLayout(http_group)
+
+        language_row = QHBoxLayout()
+        language_row.addWidget(QLabel("Language"))
+        language_row.addWidget(self.api_http_language, 1)
+        http_layout.addLayout(language_row)
+
+        snippet_row = QHBoxLayout()
+        snippet_row.addWidget(QLabel("Request snippet"))
+        snippet_row.addStretch(1)
+        snippet_row.addWidget(copy_http_btn)
+        http_layout.addLayout(snippet_row)
+        http_layout.addWidget(self.api_http_snippet)
 
         tools_row = QHBoxLayout()
-        tools_row.addWidget(QLabel("OpenAI tool schema JSON"))
+        tools_row.addWidget(QLabel("For agents that call HTTP tools directly"))
         tools_row.addStretch(1)
         tools_row.addWidget(copy_tools_btn)
-
-        mcp_row = QHBoxLayout()
-        mcp_row.addWidget(QLabel("MCP client config (mcpServers)"))
-        mcp_row.addStretch(1)
-        mcp_row.addWidget(copy_mcp_btn)
+        http_layout.addLayout(tools_row)
+        http_layout.addWidget(self.api_tools)
 
         layout = QVBoxLayout(self.api_tab)
         layout.addLayout(base_row)
-        layout.addLayout(curl_row)
-        layout.addWidget(self.api_curl)
-        layout.addLayout(tools_row)
-        layout.addWidget(self.api_tools)
-        layout.addLayout(mcp_row)
-        layout.addWidget(self.api_mcp)
+        layout.addWidget(http_group)
         layout.addWidget(self.api_status)
 
     def copy_api_text(self, text, message):
@@ -724,13 +726,157 @@ class MainWindow(QMainWindow):
         root = Path(__file__).resolve().parents[1]
         return str((root / ".venv" / "Scripts" / "python.exe").resolve())
 
+    def http_choice_payload(self, min_confidence):
+        payload = {
+            "state": "User says: package never arrived and wants a refund.",
+            "questions": {
+                "route": {
+                    "type": "choice",
+                    "instructions": "Choose the support route.",
+                    "criteria": {
+                        "refund": "refund or chargeback request",
+                        "shipping": "delivery delay or tracking issue",
+                        "general": "everything else",
+                    },
+                }
+            },
+        }
+        if min_confidence is not None:
+            payload["min_confidence"] = round(float(min_confidence), 2)
+        return payload
+
+    def http_snippet_python(self, base_url, payload):
+        payload_json = json.dumps(payload, indent=2)
+        return "\n".join(
+            [
+                "import json",
+                "",
+                "try:",
+                "    import httpx",
+                "except ImportError:",
+                "    httpx = None",
+                "    import requests",
+                "",
+                f"BASE_URL = {json.dumps(base_url)}",
+                "",
+                "def call_online_llm(state: str) -> str:",
+                "    return 'online_fallback'",
+                "",
+                f"payload = {payload_json}",
+                "",
+                "if httpx is not None:",
+                "    response = httpx.post(f'{BASE_URL}/v1/systemone', json=payload, timeout=30)",
+                "else:",
+                "    response = requests.post(f'{BASE_URL}/v1/systemone', json=payload, timeout=30)",
+                "response.raise_for_status()",
+                "answer = response.json()['answers']['route']",
+                "",
+                "if answer.get('unsure') is True:",
+                "    route = call_online_llm(payload['state'])",
+                "else:",
+                "    route = answer['choice']",
+                "",
+                "print('route:', route)",
+                "print('confidence:', answer.get('confidence'))",
+            ]
+        )
+
+    def http_snippet_javascript(self, base_url, payload):
+        payload_json = json.dumps(payload, indent=2)
+        return "\n".join(
+            [
+                f"const BASE_URL = {json.dumps(base_url)};",
+                "",
+                "function callOnlineLLM(state) {",
+                "  return 'online_fallback';",
+                "}",
+                "",
+                "async function main() {",
+                f"  const payload = {payload_json};",
+                "",
+                "  const response = await fetch(`${BASE_URL}/v1/systemone`, {",
+                "    method: 'POST',",
+                "    headers: { 'Content-Type': 'application/json' },",
+                "    body: JSON.stringify(payload),",
+                "  });",
+                "",
+                "  if (!response.ok) {",
+                "    throw new Error(`HTTP ${response.status}: ${await response.text()}`);",
+                "  }",
+                "",
+                "  const answer = (await response.json()).answers.route;",
+                "  const route = answer.unsure ? callOnlineLLM(payload.state) : answer.choice;",
+                "",
+                "  console.log('route:', route);",
+                "  console.log('confidence:', answer.confidence);",
+                "}",
+                "",
+                "main().catch((error) => {",
+                "  console.error(error);",
+                "  process.exitCode = 1;",
+                "});",
+            ]
+        )
+
+    def http_snippet_curl(self, base_url, payload):
+        payload_json = json.dumps(payload, indent=2)
+        return "\n".join(
+            [
+                "#!/usr/bin/env bash",
+                f"BASE_URL={json.dumps(base_url)}",
+                "",
+                "call_online_llm() {",
+                "  state=\"$1\"",
+                "  echo \"online_fallback\"",
+                "}",
+                "",
+                "payload=$(cat <<'JSON'",
+                payload_json,
+                "JSON",
+                ")",
+                "",
+                "response=$(curl -sS -X POST \"$BASE_URL/v1/systemone\" -H \"Content-Type: application/json\" -d \"$payload\")",
+                "",
+                "route=$(RESPONSE=\"$response\" python - <<'PY'",
+                "import json, os",
+                "answer = json.loads(os.environ['RESPONSE'])['answers']['route']",
+                "print('UNSURE' if answer.get('unsure') else answer.get('choice', ''))",
+                "PY",
+                ")",
+                "",
+                "if [ \"$route\" = \"UNSURE\" ]; then",
+                "  route=\"$(call_online_llm \"User says: package never arrived and wants a refund.\")\"",
+                "fi",
+                "",
+                "confidence=$(RESPONSE=\"$response\" python - <<'PY'",
+                "import json, os",
+                "print(json.loads(os.environ['RESPONSE'])['answers']['route'].get('confidence', ''))",
+                "PY",
+                ")",
+                "",
+                "printf 'route: %s\\n' \"$route\"",
+                "printf 'confidence: %s\\n' \"$confidence\"",
+            ]
+        )
+
+    def http_snippet_text(self, language, base_url, min_confidence):
+        payload = self.http_choice_payload(min_confidence)
+        if language == "JavaScript":
+            return self.http_snippet_javascript(base_url, payload)
+        if language == "curl":
+            return self.http_snippet_curl(base_url, payload)
+        return self.http_snippet_python(base_url, payload)
+
     def openai_tools_schema(self):
         min_conf = {
             "type": "number",
             "minimum": 0,
             "maximum": 1,
         }
-        base_note = "State-only context (max ~8K tokens, no memory). Returns probabilities plus decided/defer."
+        base_note = (
+            "State-only context (max ~8K tokens, no memory). Returns probabilities and decided/defer; "
+            "below min_confidence the answer value is \"unsure\" with unsure: true and raw_* fields."
+        )
         return [
             {
                 "type": "function",
@@ -810,34 +956,11 @@ class MainWindow(QMainWindow):
         base_url = self.base_url()
         self.api_base_url.setText(base_url)
 
-        curl_payload = {
-            "state": "The customer says: my package never arrived and I want my money back.",
-            "questions": {
-                "refund": {
-                    "type": "noul",
-                    "instructions": "Is this a refund request?",
-                }
-            },
-        }
-        curl_lines = [
-            f"curl -X POST {base_url}/v1/systemone \\",
-            "  -H \"Content-Type: application/json\" \\",
-            f"  -d '{json.dumps(curl_payload, indent=2)}'",
-        ]
-        self.api_curl.setPlainText("\n".join(curl_lines))
+        min_confidence = self.active_safety_threshold()
+        language = self.api_http_language.currentText()
+        self.api_http_snippet.setPlainText(self.http_snippet_text(language, base_url, min_confidence))
 
         self.api_tools.setPlainText(json.dumps(self.openai_tools_schema(), indent=2))
-
-        mcp_config = {
-            "mcpServers": {
-                "tinyjev": {
-                    "command": self.project_venv_python(),
-                    "args": ["-m", "tinyjev_gui.mcp"],
-                    "env": {"TINYJEV_URL": base_url},
-                }
-            }
-        }
-        self.api_mcp.setPlainText(json.dumps(mcp_config, indent=2))
 
     def load_model_metadata(self):
         api = HfApi()
@@ -1188,12 +1311,14 @@ class MainWindow(QMainWindow):
         self.settings.setValue("safety_threshold_enabled", bool(checked))
         self.safety_threshold_slider.setEnabled(bool(checked))
         self._note_safety_threshold_next_start()
+        self.update_api_tab_content()
 
     def safety_threshold_changed(self, slider_value):
         value = max(0.50, min(0.99, float(slider_value) / 100.0))
         self.update_safety_threshold_label(value)
         self.settings.setValue("safety_threshold", value)
         self._note_safety_threshold_next_start()
+        self.update_api_tab_content()
 
 
     def send(self):
