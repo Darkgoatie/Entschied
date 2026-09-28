@@ -1,6 +1,7 @@
 import errno
 import getpass
 import json
+import shlex
 import shutil
 import socket
 import subprocess
@@ -494,6 +495,42 @@ class MainWindow(QMainWindow):
             pythonw_path = Path(self.project_venv_python())
         return f'"{pythonw_path}" -m tinyjev_gui --minimized'
 
+    def startup_command_executable(self, command):
+        raw = str(command or "").strip()
+        if not raw:
+            return None
+        try:
+            parts = shlex.split(raw, posix=False)
+        except ValueError:
+            return None
+        if not parts:
+            return None
+        return Path(parts[0].strip('"'))
+
+    def startup_targets(self):
+        python_path = Path(self.project_venv_python())
+        pythonw_path = python_path.with_name("pythonw.exe")
+        targets = []
+        for candidate in (python_path, pythonw_path):
+            if candidate.exists():
+                try:
+                    targets.append(str(candidate.resolve()))
+                except OSError:
+                    continue
+        return set(targets)
+
+    def startup_command_matches_current_repo(self, command):
+        executable = self.startup_command_executable(command)
+        if executable is None or not executable.exists():
+            return False
+        try:
+            resolved_executable = str(executable.resolve())
+        except OSError:
+            return False
+        if resolved_executable not in self.startup_targets():
+            return False
+        return "-m tinyjev_gui" in str(command)
+
     def start_on_login_enabled(self):
         if not sys.platform.startswith("win"):
             return False
@@ -502,9 +539,17 @@ class MainWindow(QMainWindow):
 
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\\Microsoft\\Windows\\CurrentVersion\\Run") as key:
                 value, _ = winreg.QueryValueEx(key, "TinyJevServerGUI")
-                return bool(str(value).strip())
         except OSError:
             return False
+
+        command = str(value).strip()
+        if not command:
+            return False
+        if self.startup_command_matches_current_repo(command):
+            return True
+
+        ok, _ = self.set_start_on_login(True)
+        return ok
 
     def set_start_on_login(self, enabled):
         if not sys.platform.startswith("win"):
