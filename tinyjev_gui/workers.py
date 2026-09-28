@@ -58,6 +58,49 @@ class HealthWorker(QThread):
         self.done.emit(ready)
 
 
+class ModelMetadataWorker(QThread):
+    done = Signal(object, object)
+
+    def __init__(self, entries, timeout_seconds=2.5):
+        super().__init__()
+        self.entries = [(str(name), str(repo_id)) for name, repo_id in entries]
+        self.timeout_seconds = max(0.5, float(timeout_seconds))
+
+    def fetch_with_timeout(self, api, repo_id):
+        result = {}
+
+        def target():
+            try:
+                result["info"] = api.model_info(repo_id, files_metadata=True)
+            except Exception:
+                result["info"] = None
+
+        thread = threading.Thread(target=target, daemon=True)
+        thread.start()
+        thread.join(self.timeout_seconds)
+        if thread.is_alive():
+            return None
+        return result.get("info")
+
+    def run(self):
+        api = HfApi()
+        expected_files = {}
+        expected_sizes = {}
+
+        for model_name, repo_id in self.entries:
+            info = self.fetch_with_timeout(api, repo_id)
+            if info is None:
+                continue
+
+            files = [item.rfilename for item in info.siblings if getattr(item, "rfilename", None)]
+            sizes = [item.size for item in info.siblings if getattr(item, "size", None)]
+            expected_files[model_name] = files
+            if sizes:
+                expected_sizes[model_name] = int(sum(sizes))
+
+        self.done.emit(expected_files, expected_sizes)
+
+
 class DownloadWorker(QThread):
     started_model = Signal(str, object, object)
     progress = Signal(str, object, object, float)

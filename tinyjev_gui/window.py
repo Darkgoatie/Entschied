@@ -9,7 +9,7 @@ import sys
 import time
 from pathlib import Path
 
-from huggingface_hub import HfApi, scan_cache_dir, try_to_load_from_cache
+from huggingface_hub import scan_cache_dir, try_to_load_from_cache
 from huggingface_hub.constants import HF_HUB_CACHE
 from PySide6.QtCore import QObject, QProcess, QSettings, Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QFont
@@ -62,6 +62,7 @@ from .workers import (
     GgufConvertWorker,
     GpuRuntimeSetupWorker,
     HealthWorker,
+    ModelMetadataWorker,
     RequestWorker,
 )
 
@@ -178,6 +179,7 @@ class MainWindow(QMainWindow):
         self.unexpected_stop_message = ""
         self.start_error_message = ""
         self.health_worker = None
+        self.metadata_worker = None
         self.worker = None
         self.download_worker = None
         self.download_state = None
@@ -349,7 +351,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
 
         self.load_example("noul")
-        self.load_model_metadata()
+        self.start_model_metadata_load()
         self.refresh_model_table()
         self.models_timer.start()
         self.setup_tray()
@@ -640,6 +642,9 @@ class MainWindow(QMainWindow):
 
     def cleanup_for_exit(self):
         self.models_timer.stop()
+
+        if self.metadata_worker and self.metadata_worker.isRunning():
+            self.metadata_worker.wait(500)
 
         if self.download_worker and self.download_worker.isRunning():
             self.download_worker.cancel()
@@ -1107,18 +1112,25 @@ class MainWindow(QMainWindow):
 
         self.api_tools.setPlainText(json.dumps(self.openai_tools_schema(), indent=2))
 
-    def load_model_metadata(self):
-        api = HfApi()
-        for entry in self.model_entries:
-            try:
-                info = api.model_info(entry.repo_id, files_metadata=True)
-                files = [item.rfilename for item in info.siblings if getattr(item, "rfilename", None)]
-                sizes = [item.size for item in info.siblings if getattr(item, "size", None)]
-                self.expected_files[entry.name] = files
-                if sizes:
-                    self.expected_sizes[entry.name] = int(sum(sizes))
-            except Exception:
-                continue
+    def start_model_metadata_load(self):
+        if self.metadata_worker and self.metadata_worker.isRunning():
+            return
+
+        entries = [(entry.name, entry.repo_id) for entry in self.model_entries]
+        self.metadata_worker = ModelMetadataWorker(entries=entries, timeout_seconds=2.5)
+        self.metadata_worker.done.connect(self.model_metadata_loaded)
+        self.metadata_worker.finished.connect(self.model_metadata_finished)
+        self.metadata_worker.start()
+
+    def model_metadata_loaded(self, expected_files, expected_sizes):
+        if expected_files:
+            self.expected_files.update(expected_files)
+        if expected_sizes:
+            self.expected_sizes.update(expected_sizes)
+        self.refresh_model_table()
+
+    def model_metadata_finished(self):
+        self.metadata_worker = None
 
     def model_changed(self, model_name):
         self.settings.setValue("model", model_name)
