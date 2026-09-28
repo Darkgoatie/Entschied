@@ -1238,6 +1238,31 @@ class MainWindow(QMainWindow):
                 return
             executable = str(gpu_python)
         elif device == "vulkan":
+            try:
+                find_llama_server(auto_download=False)
+            except Exception:
+                answer = QMessageBox.question(
+                    self,
+                    "Vulkan runtime missing",
+                    "llama.cpp Vulkan backend is not installed. Download it now?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes,
+                )
+                if answer != QMessageBox.Yes:
+                    self.log.appendPlainText("Vulkan start cancelled: llama.cpp Vulkan backend is missing.")
+                    self.status.setText("Vulkan runtime missing")
+                    return
+
+                try:
+                    server_path = find_llama_server(log=lambda msg: self.log.appendPlainText(str(msg)), auto_download=True)
+                    self.log.appendPlainText(f"Vulkan backend ready: {server_path}")
+                except Exception as exc:
+                    message = f"Failed to download llama.cpp Vulkan backend: {exc}"
+                    self.log.appendPlainText(message)
+                    self.status.setText(message)
+                    QMessageBox.warning(self, "Vulkan runtime", message)
+                    return
+
             bundle = cached_gguf_bundle(model_name, selected_quant)
             rows = gguf_status(model_name)
             converted = next(
