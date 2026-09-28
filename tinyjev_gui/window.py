@@ -469,8 +469,9 @@ class MainWindow(QMainWindow):
         if idx >= 0:
             self.gguf_quant_combo.setCurrentIndex(idx)
         self.gguf_quant_combo.blockSignals(False)
-        self.gguf_quant_combo.setEnabled(len(quants) > 1 and self.download_worker is None)
-        self.gguf_quant_label.setEnabled(len(quants) > 1)
+        running = self.proc.state() != QProcess.NotRunning
+        self.gguf_quant_combo.setEnabled(len(quants) > 1 and self.download_worker is None and not running)
+        self.gguf_quant_label.setEnabled(len(quants) > 1 and not running)
 
     def gguf_quant_changed(self, quant):
         model_name = self.current_selected_table_model() or self.selected_model_name()
@@ -1336,8 +1337,8 @@ class MainWindow(QMainWindow):
         self.convert_btn.setEnabled(not convert_running and not downloading)
         self.setup_gpu_btn.setEnabled(not gpu_setup_running and not convert_running)
         if hasattr(self, "gguf_quant_combo"):
-            self.gguf_quant_combo.setEnabled(self.gguf_quant_combo.count() > 1 and not downloading)
-            self.gguf_quant_label.setEnabled(self.gguf_quant_combo.count() > 1)
+            self.gguf_quant_combo.setEnabled(self.gguf_quant_combo.count() > 1 and not downloading and not running)
+            self.gguf_quant_label.setEnabled(self.gguf_quant_combo.count() > 1 and not running)
 
         if hasattr(self, "tray_toggle_action"):
             self.tray_toggle_action.setText("Stop server" if running else "Start server")
