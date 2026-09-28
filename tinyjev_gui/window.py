@@ -2019,22 +2019,7 @@ class MainWindow(QMainWindow):
     def cancel_download(self):
         if self.download_worker and self.download_worker.isRunning():
             self.download_worker.cancel()
-            self.download_info.setText("Stopping download...")
-            QTimer.singleShot(3000, self.force_cancel_download)
-
-    def force_cancel_download(self):
-        worker = self.download_worker
-        if not worker or not worker.isRunning():
-            return
-        worker.terminate()
-        worker.wait(2000)
-        if self.download_worker is worker:
-            self.download_worker = None
-        self.download_state = None
-        self.download_result_received = True
-        self.download_info.setText("Download canceled.")
-        self.download_bar.setValue(0)
-        self.refresh_model_table()
+            self.download_info.setText("Cancelling...")
 
     def cache_repo_for_model(self, entry):
         if self.selected_device() == "vulkan":
