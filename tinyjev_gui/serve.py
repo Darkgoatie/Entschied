@@ -34,6 +34,18 @@ def _shutdown_agent_resources(agent) -> None:
             pass
 
 
+def _local_model_source(model_name: str) -> str:
+    from .vulkan_setup import resolve_snapshot
+
+    try:
+        return str(resolve_snapshot(model_name, local_files_only=True))
+    except Exception:
+        raise FileNotFoundError(
+            f"{model_name} is not downloaded for CPU/DirectML. "
+            f"Download it in the Models tab with Device set to CPU or GPU (DirectML), or use --device vulkan."
+        ) from None
+
+
 def load_agent(model_name: str, device: str, quant: str | None = None):
     if device == "gpu":
         import torch_directml
@@ -51,9 +63,10 @@ def load_agent(model_name: str, device: str, quant: str | None = None):
                 f"{model_name} is {model_gb:.2f} GB. Use --device vulkan for this model."
             )
 
+        source = _local_model_source(model_name)
         torch_backend.Qwen3Backbone = DirectMLQwen3Backbone
         dml_device = str(torch_directml.device())
-        return tinyjev.load(model_name, backend="torch", device=dml_device)
+        return tinyjev.load(source, backend="torch", device=dml_device)
 
     if device == "vulkan":
         import tinyjev.backends.torch_backend as torch_backend
@@ -101,7 +114,7 @@ def load_agent(model_name: str, device: str, quant: str | None = None):
         agent._llama_model_root = str(load_source)
         return agent
 
-    return tinyjev.load(model_name, backend="torch", device="cpu")
+    return tinyjev.load(_local_model_source(model_name), backend="torch", device="cpu")
 
 
 def _reject_nonfinite(value):
@@ -130,6 +143,11 @@ def _confidence_for_answer(answer: dict[str, Any]) -> float | None:
     answer_type = answer.get("type")
 
     if answer_type == "choice":
+        probabilities = answer.get("probabilities")
+        if isinstance(probabilities, dict):
+            values = [p for p in (_as_float(v) for v in probabilities.values()) if p is not None]
+            if values:
+                return max(values)
         return _as_float(answer.get("confidence"))
 
     if answer_type == "noul":
