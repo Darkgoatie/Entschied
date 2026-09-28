@@ -2,6 +2,16 @@
 
 Desktop app for running a local [TinyJev](https://huggingface.co/AnkitAI/tinyjev-0.6b) server and using it as a fast decision layer.
 
+## Download
+
+- Installer: `TinyJev-Setup-0.1.0.exe` (Windows 10/11 x64)
+- The installer is unsigned. If SmartScreen blocks it, click **More info** then **Run anyway**.
+- First run downloads the TinyJev model files from Hugging Face.
+- The frozen app uses `llama.cpp` for both **GPU (Vulkan)** and **CPU**.
+- 42-case parity vs PyTorch CPU baseline:
+  - llama.cpp CPU: 42/42 same answers, max gap 0.020, mean gap 0.006
+  - llama.cpp Vulkan: 42/42 same answers, max gap 0.018, mean gap 0.007
+
 ## TinyJev in front of your LLM (recommended)
 
 The main cost/latency win is to call TinyJev **before** your online LLM.
@@ -66,7 +76,8 @@ Use the **API** tab in the GUI.
 ## Features
 
 - Start/stop local server with host/port/model controls (default `8077`)
-- Device switch: CPU, GPU (DirectML), or GPU (Vulkan via llama.cpp)
+- Device switch: CPU (llama.cpp) and GPU (Vulkan via llama.cpp)
+- Source-only legacy modes (when torch is available): CPU (PyTorch) and GPU (DirectML)
 - Model manager: download/cancel/delete/open cache folder, GGUF quant selector, optional GGUF conversion
 - Playground for `noul`, `choice`, and `score`
 - Safety threshold slider (0.50-0.99) with persisted value and server start integration
@@ -74,13 +85,23 @@ Use the **API** tab in the GUI.
 - API tab with copyable base URL, HTTP snippets (Python/JavaScript/curl), and OpenAI tool schema JSON
 - System tray mode and startup options on Windows
 
-## Install
+## From source
 
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
 pip install -e .
 ```
+
+## Building the installer
+
+Requires Inno Setup 6 (`ISCC.exe`) and the project venv at `.venv`.
+
+```bash
+python build.py
+```
+
+`build.py` builds the frozen app, runs `TinyJev.exe --self-test`, and creates `dist/TinyJev-Setup-0.1.0.exe`.
 
 Run GUI:
 
@@ -121,22 +142,28 @@ python -m tinyjev_gui.serve --model TinyJev-0.6B --device gpu --host 127.0.0.1 -
 
 TinyJev Vulkan mode runs the Qwen3 backbone through `llama-server` embeddings (`--embeddings --pooling none`) and keeps the TinyJev pointer head in Python.
 
-- Preferred `llama-server` path: Atomic Chat Vulkan build (auto-detected)
+- Frozen app bundles `llama-server.exe` and required DLLs under `llama/`
 - Override executable: set `TINYJEV_LLAMA_SERVER`
-- If no local executable is found, the server downloads the official Windows Vulkan release into `%LOCALAPPDATA%/TinyJev/llama.cpp`
+- From source (non-frozen), if no local executable is found the app can download a Windows Vulkan release into `%LOCALAPPDATA%/TinyJev/llama.cpp`
 - GGUF files are downloaded from:
   - https://huggingface.co/darkgoatie/TinyJev-0.6B-GGUF
   - https://huggingface.co/darkgoatie/TinyJev-4B-GGUF
-- Vulkan downloads pull only the selected quant plus support files (`head.safetensors`, `tinyjev.json`, `config.json`, tokenizer files, `README.md`)
+- Downloads pull only the selected quant plus support files (`head.safetensors`, `tinyjev.json`, `config.json`, tokenizer files, `README.md`)
 - GGUF files can also live in `TINYJEV_GGUF_DIR` when set
-- Local conversion is optional fallback only
+- Local conversion is optional fallback only (source mode)
 
-In **Models** tab, pick a GGUF quant and click **Download**. Use **Convert GGUF** only when you need a local conversion fallback.
+In **Models** tab, pick a GGUF quant and click **Download**. In the frozen app, downloads from the GGUF repos are the model path.
 
 Direct server entrypoint:
 
 ```bash
 python -m tinyjev_gui.serve --model TinyJev-4B --device vulkan --host 127.0.0.1 --port 8096
+```
+
+CPU llama.cpp entrypoint:
+
+```bash
+python -m tinyjev_gui.serve --model TinyJev-0.6B --device cpu --host 127.0.0.1 --port 8097
 ```
 
 ## API
@@ -202,7 +229,8 @@ Override with `TINYJEV_URL`.
 - **Quit** stops the TinyJev server before exit
 - Windows **Start app on login** writes:
   - `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\TinyJevServerGUI`
-  - command: `.venv\Scripts\pythonw.exe -m tinyjev_gui --minimized`
+  - command while running from source: `.venv\Scripts\pythonw.exe -m tinyjev_gui --minimized`
+  - command in the frozen app: `TinyJev.exe --minimized`
 
 ## License
 
