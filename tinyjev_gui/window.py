@@ -1,3 +1,4 @@
+import errno
 import getpass
 import json
 import shutil
@@ -174,6 +175,7 @@ class MainWindow(QMainWindow):
         self.server_ready = False
         self.has_seen_ready = False
         self.unexpected_stop_message = ""
+        self.start_error_message = ""
         self.health_worker = None
         self.worker = None
         self.download_worker = None
@@ -1112,8 +1114,25 @@ class MainWindow(QMainWindow):
 
         host = self.host.text().strip() or "127.0.0.1"
         port = self.port.value()
-        if self.is_port_busy(host, port):
+
+        if not self.host_is_valid_local(host):
+            message = f"Invalid host: {host}"
+            self.start_error_message = "Invalid host"
+            self.log.appendPlainText(message)
+            self.status.setText("Invalid host")
+            return
+
+        port_busy, bind_error = self.is_port_busy(host, port)
+        if bind_error is not None and getattr(bind_error, "errno", None) != errno.EADDRINUSE:
+            message = f"Invalid host: {host}"
+            self.start_error_message = "Invalid host"
+            self.log.appendPlainText(message)
+            self.status.setText("Invalid host")
+            return
+
+        if port_busy:
             message = f"Port {port} is already in use on {host}."
+            self.start_error_message = message
             self.log.appendPlainText(message)
             self.status.setText(message)
             return
@@ -1207,6 +1226,7 @@ class MainWindow(QMainWindow):
         self.server_ready = False
         self.has_seen_ready = False
         self.unexpected_stop_message = ""
+        self.start_error_message = ""
         self.safety_hint_visible = False
         self.readiness_timer.setInterval(700)
         self.update_state()
@@ -1251,6 +1271,7 @@ class MainWindow(QMainWindow):
         self.server_ready = False
         self.has_seen_ready = False
         self.unexpected_stop_message = ""
+        self.start_error_message = ""
         self.stop_requested = True
         self.log.appendPlainText("Stopping server...")
         self.stop_process_tree()
@@ -1355,6 +1376,9 @@ class MainWindow(QMainWindow):
         else:
             if self.unexpected_stop_message:
                 self.status.setText(self.unexpected_stop_message)
+                return
+            if self.start_error_message:
+                self.status.setText(self.start_error_message)
                 return
             selected_model = self.selected_model_name()
             if self.model_is_downloaded(selected_model):
@@ -1480,15 +1504,50 @@ class MainWindow(QMainWindow):
     def show_result(self, text):
         self.result.setPlainText(text)
 
-    def is_port_busy(self, host, port):
-        probe_host = host if host and host != "0.0.0.0" else "127.0.0.1"
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    def _bind_sockaddr(self, family, sockaddr):
+        with socket.socket(family, socket.SOCK_STREAM) as sock:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(sockaddr)
+
+    def host_is_valid_local(self, host):
+        cleaned = str(host or "").strip().lower()
+        if cleaned in {"0.0.0.0", "::", "[::]"}:
+            return False
+
+        try:
+            addr_info = socket.getaddrinfo(host, 0, type=socket.SOCK_STREAM)
+        except OSError:
+            return False
+
+        for family, _, _, _, sockaddr in addr_info:
             try:
-                sock.bind((probe_host, int(port)))
-            except OSError:
+                self._bind_sockaddr(family, sockaddr)
                 return True
+            except OSError:
+                continue
+
         return False
+
+    def is_port_busy(self, host, port):
+        try:
+            addr_info = socket.getaddrinfo(host, int(port), type=socket.SOCK_STREAM)
+        except OSError as exc:
+            return False, exc
+
+        bind_succeeded = False
+        last_error = None
+        for family, _, _, _, sockaddr in addr_info:
+            try:
+                self._bind_sockaddr(family, sockaddr)
+                bind_succeeded = True
+            except OSError as exc:
+                if getattr(exc, "errno", None) == errno.EADDRINUSE:
+                    return True, exc
+                last_error = exc
+
+        if bind_succeeded:
+            return False, None
+        return False, last_error
 
     def model_is_downloaded(self, model_name):
         status = self.model_status_codes.get(model_name)
