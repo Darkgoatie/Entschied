@@ -54,7 +54,7 @@ def jev_yesno(
     question: str,
     min_confidence: float | None = None,
 ) -> dict[str, Any]:
-    """Binary route/gate check. State is the only context (max ~8K tokens, no memory). Returns probabilities and decided/defer."""
+    """Binary route/gate check. State is the only context (max ~8K tokens, no memory). Returns probabilities and decided/defer; below threshold the answer is "unsure"."""
 
     answers = _request_systemone(
         questions={"result": {"type": "noul", "instructions": question}},
@@ -71,7 +71,7 @@ def jev_choice(
     options: dict[str, str],
     min_confidence: float | None = None,
 ) -> dict[str, Any]:
-    """Pick one option. State is the only context (max ~8K tokens, no memory). Returns option probabilities and decided/defer."""
+    """Pick one option. State is the only context (max ~8K tokens, no memory). Returns option probabilities and decided/defer; below threshold the answer is "unsure"."""
 
     answers = _request_systemone(
         questions={
@@ -94,7 +94,7 @@ def jev_score(
     levels: list[str],
     min_confidence: float | None = None,
 ) -> dict[str, Any]:
-    """Ordinal score. State is the only context (max ~8K tokens, no memory). Returns score probabilities and decided/defer."""
+    """Ordinal score. State is the only context (max ~8K tokens, no memory). Returns score probabilities and decided/defer; below threshold the answer is "unsure"."""
 
     answers = _request_systemone(
         questions={
@@ -116,7 +116,7 @@ def jev_batch(
     questions: dict[str, Any],
     min_confidence: float | None = None,
 ) -> dict[str, Any]:
-    """Many questions, one state. State is the only context (max ~8K tokens, no memory). Returns probabilities and decided/defer."""
+    """Many questions, one state. State is the only context (max ~8K tokens, no memory). Returns probabilities and decided/defer; below threshold the answer is "unsure"."""
 
     return _request_systemone(
         questions=questions,

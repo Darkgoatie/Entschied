@@ -10,7 +10,7 @@ from typing import Any
 
 import tinyjev
 
-DEFAULT_MIN_CONFIDENCE = 0.85
+DEFAULT_MIN_CONFIDENCE = 0.70
 MAX_BODY = 2_000_000
 
 
@@ -176,6 +176,28 @@ def _resolve_confidence_cutoffs(
     return request_cutoff, per_question_cutoffs
 
 
+def _mark_unsure(answer: dict[str, Any]) -> None:
+    answer_type = answer.get("type")
+
+    if answer_type == "choice":
+        answer["raw_choice"] = answer.get("choice")
+        answer["choice"] = "unsure"
+    elif answer_type == "noul":
+        probability = _as_float(answer.get("noul"))
+        if probability is not None:
+            answer["raw_answer"] = "yes" if probability >= 0.5 else "no"
+            answer["probabilities"] = {
+                "yes": float(probability),
+                "no": float(1.0 - probability),
+            }
+        answer["noul"] = "unsure"
+    elif answer_type == "score":
+        answer["raw_score"] = answer.get("score")
+        answer["score"] = "unsure"
+
+    answer["unsure"] = True
+
+
 def _annotate_decisions(
     body: dict[str, Any],
     response: dict[str, Any],
@@ -195,8 +217,6 @@ def _annotate_decisions(
 
         cutoff = per_question_cutoffs.get(question_id, request_cutoff)
         if cutoff is None:
-            answer["decided"] = True
-            answer.pop("defer", None)
             continue
 
         confidence = _confidence_for_answer(answer)
@@ -204,7 +224,12 @@ def _annotate_decisions(
         answer["decided"] = decided
         if decided:
             answer.pop("defer", None)
+            answer.pop("unsure", None)
+            answer.pop("raw_choice", None)
+            answer.pop("raw_answer", None)
+            answer.pop("raw_score", None)
         else:
+            _mark_unsure(answer)
             answer["defer"] = True
 
     return response
@@ -315,7 +340,7 @@ def main(argv=None) -> int:
         const=DEFAULT_MIN_CONFIDENCE,
         type=float,
         default=None,
-        help="Enable decided/defer output by default. If no value is given, uses 0.85.",
+        help="Enable decided/defer output by default. If no value is given, uses 0.70.",
     )
     args = parser.parse_args(argv)
 

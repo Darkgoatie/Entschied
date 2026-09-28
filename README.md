@@ -60,6 +60,7 @@ MCP is still useful for integration convenience, but token savings are usually b
 - Device switch: CPU, GPU (DirectML), or GPU (Vulkan via llama.cpp)
 - Model manager: download/cancel/delete/open cache folder, GGUF quant selector, optional GGUF conversion
 - Playground for `noul`, `choice`, and `score`
+- Safety threshold slider (0.50-0.99) with persisted value and server start integration
 - Optional confidence cutoff in playground (`decided` / `defer`)
 - API tab with copyable base URL, curl sample, tool schema JSON, MCP config snippet
 - System tray mode and startup options on Windows
@@ -147,6 +148,7 @@ Behavior:
 - with cutoff active, each answer includes:
   - `decided: true|false`
   - `defer: true` when `decided` is false
+  - below threshold, answer value becomes `"unsure"` with `unsure: true` and raw value in `raw_choice` / `raw_answer` / `raw_score`
 
 Server-wide default cutoff:
 

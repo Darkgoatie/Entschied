@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QSlider,
     QSpinBox,
     QSplitter,
     QStyle,
@@ -60,6 +61,8 @@ from .workers import (
     HealthWorker,
     RequestWorker,
 )
+
+DEFAULT_SAFETY_THRESHOLD = 0.70
 
 EXAMPLES = {
     "noul": {
@@ -132,6 +135,7 @@ class MainWindow(QMainWindow):
         self.convert_worker = None
         self.last_start_device = None
         self.stop_requested = False
+        self.safety_hint_visible = False
 
         self.host = QLineEdit(self.settings.value("host", "127.0.0.1"))
         self.host.textChanged.connect(self.update_api_tab_content)
@@ -170,6 +174,23 @@ class MainWindow(QMainWindow):
             self.start_on_login_checkbox.setChecked(self.start_on_login_enabled())
             self.start_on_login_checkbox.toggled.connect(self.start_on_login_changed)
 
+        saved_threshold = float(self.settings.value("safety_threshold", DEFAULT_SAFETY_THRESHOLD))
+        saved_threshold = max(0.50, min(0.99, saved_threshold))
+        self.safety_threshold_enabled = QCheckBox("Safety threshold")
+        self.safety_threshold_enabled.setChecked(self.setting_bool("safety_threshold_enabled", True))
+        self.safety_threshold_enabled.toggled.connect(self.safety_threshold_toggled)
+
+        self.safety_threshold_slider = QSlider(Qt.Horizontal)
+        self.safety_threshold_slider.setRange(50, 99)
+        self.safety_threshold_slider.setSingleStep(1)
+        self.safety_threshold_slider.setPageStep(1)
+        self.safety_threshold_slider.setValue(int(round(saved_threshold * 100)))
+        self.safety_threshold_slider.valueChanged.connect(self.safety_threshold_changed)
+
+        self.safety_threshold_value = QLabel()
+        self.update_safety_threshold_label(saved_threshold)
+        self.safety_threshold_slider.setEnabled(self.safety_threshold_enabled.isChecked())
+
         top = QHBoxLayout()
         top.addWidget(QLabel("Host"))
         top.addWidget(self.host)
@@ -185,6 +206,10 @@ class MainWindow(QMainWindow):
         options = QHBoxLayout()
         options.addWidget(self.start_on_open_checkbox)
         options.addWidget(self.start_on_login_checkbox)
+        options.addSpacing(12)
+        options.addWidget(self.safety_threshold_enabled)
+        options.addWidget(self.safety_threshold_slider, 1)
+        options.addWidget(self.safety_threshold_value)
         options.addStretch(1)
 
         self.log = QPlainTextEdit(readOnly=True)
@@ -210,7 +235,7 @@ class MainWindow(QMainWindow):
         self.playground_cutoff.setRange(0.0, 1.0)
         self.playground_cutoff.setDecimals(2)
         self.playground_cutoff.setSingleStep(0.01)
-        self.playground_cutoff.setValue(float(self.settings.value("playground_min_confidence", 0.85)))
+        self.playground_cutoff.setValue(float(self.settings.value("playground_min_confidence", DEFAULT_SAFETY_THRESHOLD)))
         self.playground_cutoff.valueChanged.connect(self.playground_cutoff_changed)
         self.playground_cutoff.setEnabled(self.playground_cutoff_enabled.isChecked())
 
@@ -959,6 +984,7 @@ class MainWindow(QMainWindow):
 
         self.stop_requested = False
         self.server_ready = False
+        self.safety_hint_visible = False
         self.update_state()
 
         args = [
@@ -977,6 +1003,10 @@ class MainWindow(QMainWindow):
 
         if device == "vulkan":
             args.extend(["--quant", selected_quant])
+
+        threshold = self.active_safety_threshold()
+        if threshold is not None:
+            args.extend(["--min-confidence", f"{threshold:.2f}"])
 
         self.log.appendPlainText(f"> {executable} {' '.join(args)}")
         self.proc.start(executable, args)
@@ -1083,7 +1113,10 @@ class MainWindow(QMainWindow):
         if running and self.server_ready:
             self.status.setText(f"Running on {self.base_url()}")
         elif running:
-            self.status.setText(f"Starting on {self.base_url()}")
+            if self.safety_hint_visible:
+                self.status.setText("Safety threshold change will apply on next start")
+            else:
+                self.status.setText(f"Starting on {self.base_url()}")
         else:
             selected_model = self.selected_model_name()
             if self.model_is_downloaded(selected_model):
@@ -1104,6 +1137,7 @@ class MainWindow(QMainWindow):
             and not was_ready
         )
         self.stop_requested = False
+        self.safety_hint_visible = False
         self.update_state()
 
         if should_offer_cpu:
@@ -1134,6 +1168,33 @@ class MainWindow(QMainWindow):
 
     def playground_cutoff_changed(self, value):
         self.settings.setValue("playground_min_confidence", float(value))
+
+    def update_safety_threshold_label(self, value):
+        self.safety_threshold_value.setText(f"{float(value):.2f}")
+
+    def active_safety_threshold(self):
+        if not self.safety_threshold_enabled.isChecked():
+            return None
+        return float(self.safety_threshold_slider.value()) / 100.0
+
+    def _note_safety_threshold_next_start(self):
+        if self.proc.state() == QProcess.NotRunning:
+            self.safety_hint_visible = False
+            return
+        self.status.setText("Safety threshold change will apply on next start")
+        self.safety_hint_visible = True
+
+    def safety_threshold_toggled(self, checked):
+        self.settings.setValue("safety_threshold_enabled", bool(checked))
+        self.safety_threshold_slider.setEnabled(bool(checked))
+        self._note_safety_threshold_next_start()
+
+    def safety_threshold_changed(self, slider_value):
+        value = max(0.50, min(0.99, float(slider_value) / 100.0))
+        self.update_safety_threshold_label(value)
+        self.settings.setValue("safety_threshold", value)
+        self._note_safety_threshold_next_start()
+
 
     def send(self):
         if self.proc.state() == QProcess.NotRunning or not self.server_ready:

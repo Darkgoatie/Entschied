@@ -70,7 +70,7 @@ components:
           description: Optional request-level confidence cutoff.
         use_confidence_cutoff:
           type: boolean
-          description: If true and min_confidence is omitted, applies the default 0.85 cutoff.
+          description: If true and min_confidence is omitted, applies the default 0.70 cutoff.
         questions:
           type: object
           minProperties: 1
@@ -122,7 +122,18 @@ components:
         type:
           const: noul
         noul:
-          type: number
+          oneOf:
+            - type: number
+            - type: string
+              enum: [unsure]
+        probabilities:
+          type: object
+          additionalProperties:
+            type: number
+        raw_answer:
+          type: string
+        unsure:
+          type: boolean
         decided:
           type: boolean
         defer:
@@ -136,12 +147,16 @@ components:
           const: choice
         choice:
           type: string
+        raw_choice:
+          type: string
         confidence:
           type: number
         probabilities:
           type: object
           additionalProperties:
             type: number
+        unsure:
+          type: boolean
         decided:
           type: boolean
         defer:
@@ -154,6 +169,11 @@ components:
         type:
           const: score
         score:
+          oneOf:
+            - type: number
+            - type: string
+              enum: [unsure]
+        raw_score:
           type: number
         confidence:
           type: number
@@ -165,6 +185,8 @@ components:
           type: array
           items:
             type: number
+        unsure:
+          type: boolean
         decided:
           type: boolean
         defer:
