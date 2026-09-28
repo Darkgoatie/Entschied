@@ -1699,6 +1699,32 @@ class MainWindow(QMainWindow):
             return f" • {revision_count} revisions cached"
         return ""
 
+    def required_files_for_status(self, entry):
+        required = {
+            "tinyjev.json",
+            "config.json",
+            "head.safetensors",
+            "tokenizer.json",
+        }
+
+        repo_key = normalize_repo_id(entry.repo_id)
+        gguf_key = None
+        try:
+            gguf_key = normalize_repo_id(gguf_repo_id(entry.name))
+        except Exception:
+            gguf_key = None
+
+        if gguf_key and repo_key == gguf_key:
+            quant = self.selected_gguf_quant(entry.name)
+            patterns = gguf_allow_patterns(entry.name, quant)
+            gguf_name = next((name for name in patterns if str(name).lower().endswith(".gguf")), "")
+            if gguf_name:
+                required.add(str(gguf_name))
+            return required
+
+        required.add("model.safetensors")
+        return required
+
     def model_status_for_vulkan(self, entry):
         quant = self.selected_gguf_quant(entry.name)
         bundle = cached_gguf_bundle(entry.name, quant)
@@ -1756,7 +1782,8 @@ class MainWindow(QMainWindow):
             if expected_files:
                 downloaded = expected_files.issubset(local_files)
             else:
-                downloaded = bool(local_files)
+                required_files = self.required_files_for_status(entry)
+                downloaded = required_files.issubset(local_files)
 
             if downloaded:
                 return "downloaded", f"Downloaded ({human_size(repo_size)}){revision_note}", repo_size
