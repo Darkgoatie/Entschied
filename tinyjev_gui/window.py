@@ -34,7 +34,6 @@ from PySide6.QtWidgets import (
     QSystemTrayIcon,
     QTabWidget,
     QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
