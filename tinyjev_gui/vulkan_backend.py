@@ -7,7 +7,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 import numpy as np
@@ -18,10 +18,10 @@ _kill_job = None
 
 
 def _bind_to_this_process(process: subprocess.Popen) -> None:
-    """Kill the child when this process exits, even on a hard kill."""
     global _kill_job
     if not sys.platform.startswith("win"):
         return
+
     import ctypes
     from ctypes import wintypes
 
@@ -30,9 +30,17 @@ def _bind_to_this_process(process: subprocess.Popen) -> None:
     kernel32.OpenProcess.restype = wintypes.HANDLE
 
     class IO_COUNTERS(ctypes.Structure):
-        _fields_ = [(name, ctypes.c_ulonglong) for name in (
-            "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
-            "ReadTransferCount", "WriteTransferCount", "OtherTransferCount")]
+        _fields_ = [
+            (name, ctypes.c_ulonglong)
+            for name in (
+                "ReadOperationCount",
+                "WriteOperationCount",
+                "OtherOperationCount",
+                "ReadTransferCount",
+                "WriteTransferCount",
+                "OtherTransferCount",
+            )
+        ]
 
     class BASIC_LIMIT(ctypes.Structure):
         _fields_ = [
@@ -62,13 +70,13 @@ def _bind_to_this_process(process: subprocess.Popen) -> None:
         if not job:
             return
         info = EXTENDED_LIMIT()
-        info.BasicLimitInformation.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        info.BasicLimitInformation.LimitFlags = 0x2000
         if not kernel32.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info)):
             kernel32.CloseHandle(job)
             return
         _kill_job = job
 
-    handle = kernel32.OpenProcess(0x0001 | 0x0100, False, process.pid)  # PROCESS_TERMINATE | PROCESS_SET_QUOTA
+    handle = kernel32.OpenProcess(0x0001 | 0x0100, False, process.pid)
     if handle:
         kernel32.AssignProcessToJobObject(_kill_job, handle)
         kernel32.CloseHandle(handle)
@@ -103,11 +111,20 @@ def _extract_embeddings(payload: Any) -> np.ndarray:
 
 
 class LlamaServerHandle:
-    def __init__(self, executable: Path, gguf_path: Path, host: str, port: int, process: subprocess.Popen[str]):
+    def __init__(
+        self,
+        executable: Path,
+        gguf_path: Path,
+        host: str,
+        port: int,
+        mode: Literal["vulkan", "cpu"],
+        process: subprocess.Popen[str],
+    ):
         self.executable = executable
         self.gguf_path = gguf_path
         self.host = host
         self.port = port
+        self.mode = mode
         self.process = process
         self._lines: list[str] = []
         self._lock = threading.Lock()
@@ -174,9 +191,10 @@ class LlamaServerHandle:
         gguf_path: Path | None = None,
         host: str = "127.0.0.1",
         port: int | None = None,
+        mode: Literal["vulkan", "cpu"] = "vulkan",
     ) -> "LlamaServerHandle":
         executable = find_llama_server(auto_download=True)
-        if not llama_has_vulkan(str(executable)):
+        if mode == "vulkan" and not llama_has_vulkan(str(executable)):
             raise RuntimeError(f"{executable} does not report a Vulkan device")
 
         model_path = gguf_path or preferred_gguf(model_name)
@@ -189,6 +207,11 @@ class LlamaServerHandle:
 
         ctx_size = int(os.environ.get("TINYJEV_LLAMA_CTX", "8192"))
         batch = int(os.environ.get("TINYJEV_LLAMA_BATCH", str(ctx_size)))
+
+        if mode == "cpu":
+            ngl = int(os.environ.get("TINYJEV_LLAMA_NGL", "0"))
+        else:
+            ngl = int(os.environ.get("TINYJEV_LLAMA_NGL", "99"))
 
         cmd = [
             str(executable),
@@ -206,14 +229,14 @@ class LlamaServerHandle:
             "--parallel",
             "1",
             "-ngl",
-            "99",
-            "--flash-attn",
-            "on",
+            str(ngl),
             "-b",
             str(batch),
             "-ub",
             str(batch),
         ]
+        if mode == "vulkan":
+            cmd.extend(["--flash-attn", "on"])
 
         process = subprocess.Popen(
             cmd,
@@ -224,7 +247,14 @@ class LlamaServerHandle:
             errors="replace",
         )
         _bind_to_this_process(process)
-        handle = cls(executable=executable, gguf_path=model_path, host=host, port=selected_port, process=process)
+        handle = cls(
+            executable=executable,
+            gguf_path=model_path,
+            host=host,
+            port=selected_port,
+            mode=mode,
+            process=process,
+        )
         try:
             handle.wait_ready(timeout_s=180)
         except Exception:
@@ -237,12 +267,14 @@ _shared_handle: LlamaServerHandle | None = None
 _shared_lock = threading.Lock()
 
 
-def get_or_start_shared_server(model_name: str) -> LlamaServerHandle:
+def get_or_start_shared_server(model_name: str, mode: Literal["vulkan", "cpu"] = "vulkan") -> LlamaServerHandle:
     global _shared_handle
     with _shared_lock:
-        if _shared_handle and _shared_handle.process.poll() is None:
+        if _shared_handle and _shared_handle.process.poll() is None and _shared_handle.mode == mode:
             return _shared_handle
-        _shared_handle = LlamaServerHandle.start(model_name=model_name)
+        if _shared_handle:
+            _shared_handle.stop()
+        _shared_handle = LlamaServerHandle.start(model_name=model_name, mode=mode)
         return _shared_handle
 
 
@@ -254,8 +286,8 @@ def stop_shared_server() -> None:
             _shared_handle = None
 
 
-class VulkanQwen3Backbone:
-    name = "vulkan"
+class LlamaCppQwen3Backbone:
+    name = "llama.cpp"
 
     def __init__(self, config: dict, weights_path: str, prefix_min_tokens: int = 96, device=None):
         self.config = config
@@ -264,11 +296,15 @@ class VulkanQwen3Backbone:
         self._owned_server: LlamaServerHandle | None = None
 
         base_url = os.environ.get("TINYJEV_LLAMA_URL", "").strip()
+        mode = os.environ.get("TINYJEV_LLAMA_MODE", "vulkan").strip().lower()
+        if mode not in {"vulkan", "cpu"}:
+            mode = "vulkan"
+
         if base_url:
             self.base_url = base_url.rstrip("/")
         else:
-            model_name = os.environ.get("TINYJEV_MODEL_NAME", "TinyJev-4B")
-            server = get_or_start_shared_server(model_name=model_name)
+            model_name = os.environ.get("TINYJEV_MODEL_NAME", "TinyJev-0.6B")
+            server = get_or_start_shared_server(model_name=model_name, mode=mode)
             self._owned_server = server
             self.base_url = server.base_url
 
@@ -297,3 +333,6 @@ class VulkanQwen3Backbone:
         if owned and os.environ.get("TINYJEV_LLAMA_URL", "").strip() == "":
             stop_shared_server()
             self._owned_server = None
+
+
+VulkanQwen3Backbone = LlamaCppQwen3Backbone

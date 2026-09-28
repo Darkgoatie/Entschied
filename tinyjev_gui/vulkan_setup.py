@@ -12,7 +12,11 @@ from typing import Callable
 
 from huggingface_hub import snapshot_download, try_to_load_from_cache
 
+from .runtime import app_root, is_frozen_app
+
 LLAMA_COMMIT = "5266f24da"
+LLAMA_BUNDLED_TAG = "b11236"
+LLAMA_BUNDLED_ZIP = f"llama-{LLAMA_BUNDLED_TAG}-bin-win-vulkan-x64.zip"
 DIRECTML_SIZE_LIMIT_BYTES = int(5.5 * 1024**3)
 GGUF_SUPPORT_FILES = [
     "head.safetensors",
@@ -287,9 +291,32 @@ def directml_allowed(model_name: str, limit_bytes: int = DIRECTML_SIZE_LIMIT_BYT
     return size <= limit_bytes, size
 
 
+def bundled_llama_server() -> Path | None:
+    roots = [app_root() / "llama", app_root() / "app" / "llama"]
+    for root in roots:
+        direct = root / "llama-server.exe"
+        if direct.exists():
+            return direct
+        found = _search_llama_server(root)
+        if found is not None:
+            return found
+    return None
+
+
 def _atomic_llama_server() -> Path:
     appdata = Path(os.environ.get("APPDATA", local_appdata()))
-    return appdata / "Atomic Chat" / "data" / "llamacpp-upstream" / "backends" / "b10809" / "win-vulkan-x64" / "build" / "bin" / "llama-server.exe"
+    return (
+        appdata
+        / "Atomic Chat"
+        / "data"
+        / "llamacpp-upstream"
+        / "backends"
+        / "b10809"
+        / "win-vulkan-x64"
+        / "build"
+        / "bin"
+        / "llama-server.exe"
+    )
 
 
 def _which_llama_server() -> Path | None:
@@ -325,6 +352,24 @@ def llama_has_vulkan(executable: str) -> bool:
     return "vulkan" in output.lower()
 
 
+def _find_vulkan_asset(repo: str) -> tuple[str, dict[str, object]]:
+    for page in range(1, 11):
+        url = f"https://api.github.com/repos/{repo}/releases?per_page=100&page={page}"
+        with urllib.request.urlopen(url, timeout=30) as response:
+            releases = json.loads(response.read().decode("utf-8"))
+        if not releases:
+            break
+
+        for release in releases:
+            assets = release.get("assets", [])
+            for asset in assets:
+                name = str(asset.get("name", "")).lower()
+                if "win-vulkan-x64" in name and name.endswith(".zip"):
+                    return str(release.get("tag_name", "unknown")), asset
+
+    raise RuntimeError(f"No Windows Vulkan zip found in releases for {repo}")
+
+
 def _download_latest_vulkan_release(log: Callable[[str], None]) -> Path:
     root = llama_dir()
     downloads = root / "downloads"
@@ -335,26 +380,14 @@ def _download_latest_vulkan_release(log: Callable[[str], None]) -> Path:
 
     for repo in repos:
         try:
-            with urllib.request.urlopen(f"https://api.github.com/repos/{repo}/releases/latest", timeout=30) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-
-            assets = payload.get("assets", [])
-            selected = None
-            for asset in assets:
-                name = str(asset.get("name", "")).lower()
-                if "win-vulkan-x64" in name and name.endswith(".zip"):
-                    selected = asset
-                    break
-            if not selected:
-                raise RuntimeError(f"No Windows Vulkan zip found in latest release of {repo}")
-
-            zip_name = selected["name"]
-            zip_url = selected["browser_download_url"]
+            tag_name, selected = _find_vulkan_asset(repo)
+            zip_name = str(selected["name"])
+            zip_url = str(selected["browser_download_url"])
             zip_path = downloads / zip_name
-            extract_dir = root / payload.get("tag_name", "latest")
+            extract_dir = root / tag_name
 
             if not zip_path.exists():
-                log(f"Downloading {zip_name} from {repo}...")
+                log(f"Downloading {zip_name} from {repo} ({tag_name})...")
                 urllib.request.urlretrieve(zip_url, zip_path)
 
             if not extract_dir.exists():
@@ -383,9 +416,14 @@ def find_llama_server(log: Callable[[str], None] | None = None, auto_download: b
             raise FileNotFoundError(f"TINYJEV_LLAMA_SERVER points to missing file: {path}")
         return path
 
-    atomic = _atomic_llama_server()
-    if atomic.exists():
-        return atomic
+    bundled = bundled_llama_server()
+    if bundled is not None:
+        return bundled
+
+    if not is_frozen_app():
+        atomic = _atomic_llama_server()
+        if atomic.exists():
+            return atomic
 
     in_local = _search_llama_server(llama_dir())
     if in_local:
@@ -397,6 +435,9 @@ def find_llama_server(log: Callable[[str], None] | None = None, auto_download: b
 
     if not auto_download:
         raise FileNotFoundError("llama-server.exe not found")
+
+    if is_frozen_app():
+        raise FileNotFoundError("Bundled llama-server.exe not found in frozen app")
 
     return _download_latest_vulkan_release(log)
 
