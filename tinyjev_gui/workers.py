@@ -8,7 +8,6 @@ import httpx
 from huggingface_hub import HfApi, constants as hf_constants, snapshot_download
 from PySide6.QtCore import QThread, Signal
 
-from .gpu_setup import ensure_gpu_runtime
 from .vulkan_setup import convert_model_to_gguf
 
 
@@ -230,6 +229,8 @@ class GpuRuntimeSetupWorker(QThread):
         self._kill_active_process()
 
     def run(self):
+        from .gpu_setup import ensure_gpu_runtime
+
         try:
             py = ensure_gpu_runtime(
                 runtime_dir=self.runtime_dir,

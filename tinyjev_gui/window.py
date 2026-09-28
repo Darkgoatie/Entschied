@@ -44,7 +44,18 @@ from PySide6.QtWidgets import (
 from tinyjev.registry import MODELS
 
 from .common import ModelEntry, human_size, make_item, normalize_repo_id
-from .gpu_setup import default_runtime_dir, runtime_python
+from .runtime import directml_available, executable_path, is_frozen_app, torch_available
+
+try:
+    from .gpu_setup import default_runtime_dir, runtime_python
+except Exception:
+    def default_runtime_dir() -> Path:
+        base = Path.home()
+        return base / "AppData" / "Local" / "TinyJev" / "gpu-runtime"
+
+    def runtime_python(runtime_dir: Path) -> Path:
+        return runtime_dir / "Scripts" / "python.exe"
+
 from .vulkan_setup import (
     DIRECTML_SIZE_LIMIT_BYTES,
     cached_gguf_bundle,
@@ -209,9 +220,7 @@ class MainWindow(QMainWindow):
         self.model_combo.currentTextChanged.connect(self.model_changed)
 
         self.device_combo = QComboBox()
-        self.device_combo.addItem("CPU", "cpu")
-        self.device_combo.addItem("GPU (DirectML)", "gpu")
-        self.device_combo.addItem("GPU (Vulkan)", "vulkan")
+        self.configure_device_options()
         self.set_selected_device(self.initial_device_key())
         self.device_combo.currentIndexChanged.connect(self.device_changed)
 
@@ -400,14 +409,29 @@ class MainWindow(QMainWindow):
             return False
         return llama_has_vulkan(str(server))
 
+    def legacy_torch_modes_enabled(self):
+        return not is_frozen_app() and torch_available()
+
+    def configure_device_options(self):
+        self.device_combo.clear()
+        self.device_combo.addItem("CPU (llama.cpp)", "cpu")
+        self.device_combo.addItem("GPU (Vulkan)", "vulkan")
+        if self.legacy_torch_modes_enabled():
+            self.device_combo.addItem("CPU (PyTorch)", "cpu_torch")
+            if directml_available() or self.gpu_runtime_exists():
+                self.device_combo.addItem("GPU (DirectML)", "gpu")
+
     def normalize_device_value(self, raw_value):
         raw = str(raw_value or "").strip().lower()
         aliases = {
             "gpu": "gpu",
             "cpu": "cpu",
             "vulkan": "vulkan",
+            "cpu_torch": "cpu_torch",
+            "cpu (llama.cpp)": "cpu",
             "gpu (directml)": "gpu",
             "gpu (vulkan)": "vulkan",
+            "cpu (pytorch)": "cpu_torch",
         }
         if raw in aliases:
             return aliases[raw]
@@ -419,11 +443,11 @@ class MainWindow(QMainWindow):
     def initial_device_key(self):
         saved = self.normalize_device_value(self.settings.value("device", ""))
         if saved:
+            if saved in {"cpu_torch", "gpu"} and not self.legacy_torch_modes_enabled():
+                return "cpu"
             return saved
         if self.vulkan_runtime_available():
             return "vulkan"
-        if self.gpu_runtime_exists():
-            return "gpu"
         return "cpu"
 
     def set_selected_device(self, device_key):
@@ -439,6 +463,9 @@ class MainWindow(QMainWindow):
     def selected_device(self):
         value = self.device_combo.currentData()
         return self.normalize_device_value(value) or "cpu"
+
+    def uses_gguf_downloads(self):
+        return self.selected_device() in {"cpu", "vulkan"}
 
     def device_changed(self, *_):
         self.settings.setValue("device", self.selected_device())
@@ -475,8 +502,12 @@ class MainWindow(QMainWindow):
             self.gguf_quant_combo.setCurrentIndex(idx)
         self.gguf_quant_combo.blockSignals(False)
         running = self.proc.state() != QProcess.NotRunning
-        self.gguf_quant_combo.setEnabled(len(quants) > 1 and self.download_worker is None and not running)
-        self.gguf_quant_label.setEnabled(len(quants) > 1 and not running)
+        show_quant = self.uses_gguf_downloads()
+        self.gguf_quant_label.setVisible(show_quant)
+        self.gguf_quant_combo.setVisible(show_quant)
+        enabled = show_quant and len(quants) > 1 and self.download_worker is None and not running
+        self.gguf_quant_combo.setEnabled(enabled)
+        self.gguf_quant_label.setEnabled(show_quant and len(quants) > 1 and not running)
 
     def gguf_quant_changed(self, quant):
         model_name = self.current_selected_table_model() or self.selected_model_name()
@@ -492,6 +523,9 @@ class MainWindow(QMainWindow):
         self.settings.setValue("start_on_open", bool(checked))
 
     def startup_command(self):
+        if is_frozen_app():
+            return f'"{executable_path()}" --minimized'
+
         pythonw_path = Path(self.project_venv_python()).with_name("pythonw.exe")
         if not pythonw_path.exists():
             pythonw_path = Path(self.project_venv_python())
@@ -510,9 +544,16 @@ class MainWindow(QMainWindow):
         return Path(parts[0].strip('"'))
 
     def startup_targets(self):
+        targets = []
+        if is_frozen_app():
+            try:
+                targets.append(str(executable_path().resolve()))
+            except OSError:
+                pass
+            return set(targets)
+
         python_path = Path(self.project_venv_python())
         pythonw_path = python_path.with_name("pythonw.exe")
-        targets = []
         for candidate in (python_path, pythonw_path):
             if candidate.exists():
                 try:
@@ -531,6 +572,8 @@ class MainWindow(QMainWindow):
             return False
         if resolved_executable not in self.startup_targets():
             return False
+        if is_frozen_app():
+            return "--minimized" in str(command)
         return "-m tinyjev_gui" in str(command)
 
     def start_on_login_enabled(self):
@@ -711,6 +754,12 @@ class MainWindow(QMainWindow):
 
         self.setup_gpu_btn = QPushButton("Setup DirectML runtime")
         self.setup_gpu_btn.clicked.connect(self.setup_gpu_runtime)
+
+        if is_frozen_app():
+            self.convert_btn.setVisible(False)
+            self.setup_gpu_btn.setVisible(False)
+        elif not self.legacy_torch_modes_enabled():
+            self.setup_gpu_btn.setVisible(False)
 
         actions = QHBoxLayout()
         actions.addWidget(self.download_btn)
@@ -1203,7 +1252,7 @@ class MainWindow(QMainWindow):
         self.last_start_device = device
 
         selected_quant = self.selected_gguf_quant(model_name)
-        executable = sys.executable
+        executable = str(executable_path()) if is_frozen_app() else sys.executable
         if device == "gpu":
             allowed, size = directml_allowed(model_name)
             if not allowed:
@@ -1237,30 +1286,38 @@ class MainWindow(QMainWindow):
                     self.setup_gpu_runtime()
                 return
             executable = str(gpu_python)
-        elif device == "vulkan":
+        elif device in {"vulkan", "cpu"}:
             try:
-                find_llama_server(auto_download=False)
+                server_path = find_llama_server(auto_download=False)
+                self.log.appendPlainText(f"llama.cpp backend: {server_path}")
             except Exception:
+                if is_frozen_app():
+                    message = "Bundled llama.cpp runtime is missing. Reinstall TinyJev."
+                    self.log.appendPlainText(message)
+                    self.status.setText(message)
+                    QMessageBox.warning(self, "llama.cpp runtime", message)
+                    return
+
                 answer = QMessageBox.question(
                     self,
-                    "Vulkan runtime missing",
-                    "llama.cpp Vulkan backend is not installed. Download it now?",
+                    "llama.cpp runtime missing",
+                    "llama.cpp backend is not installed. Download it now?",
                     QMessageBox.Yes | QMessageBox.No,
                     QMessageBox.Yes,
                 )
                 if answer != QMessageBox.Yes:
-                    self.log.appendPlainText("Vulkan start cancelled: llama.cpp Vulkan backend is missing.")
-                    self.status.setText("Vulkan runtime missing")
+                    self.log.appendPlainText("Start cancelled: llama.cpp backend is missing.")
+                    self.status.setText("llama.cpp runtime missing")
                     return
 
                 try:
                     server_path = find_llama_server(log=lambda msg: self.log.appendPlainText(str(msg)), auto_download=True)
-                    self.log.appendPlainText(f"Vulkan backend ready: {server_path}")
+                    self.log.appendPlainText(f"llama.cpp backend ready: {server_path}")
                 except Exception as exc:
-                    message = f"Failed to download llama.cpp Vulkan backend: {exc}"
+                    message = f"Failed to download llama.cpp backend: {exc}"
                     self.log.appendPlainText(message)
                     self.status.setText(message)
-                    QMessageBox.warning(self, "Vulkan runtime", message)
+                    QMessageBox.warning(self, "llama.cpp runtime", message)
                     return
 
             bundle = cached_gguf_bundle(model_name, selected_quant)
@@ -1274,19 +1331,24 @@ class MainWindow(QMainWindow):
                 None,
             )
             if not bool(bundle.get("ready")) and converted is None:
-                message = (
-                    f"No GGUF files found for {model_name} ({selected_quant}). "
-                    "Download from GGUF repo first, or convert locally."
-                )
+                if is_frozen_app():
+                    message = f"No GGUF files found for {model_name} ({selected_quant}). Download from the GGUF repo first."
+                else:
+                    message = (
+                        f"No GGUF files found for {model_name} ({selected_quant}). "
+                        "Download from GGUF repo first, or convert locally."
+                    )
                 self.log.appendPlainText(message)
                 self.status.setText(message)
 
                 dialog = QMessageBox(self)
                 dialog.setIcon(QMessageBox.Warning)
                 dialog.setWindowTitle("GGUF missing")
-                dialog.setText("Vulkan needs GGUF files for the selected quant.")
+                dialog.setText("llama.cpp needs GGUF files for the selected quant.")
                 download_button = dialog.addButton("Download", QMessageBox.AcceptRole)
-                convert_button = dialog.addButton("Convert", QMessageBox.ActionRole)
+                convert_button = None
+                if not is_frozen_app():
+                    convert_button = dialog.addButton("Convert", QMessageBox.ActionRole)
                 cancel_button = dialog.addButton("Cancel", QMessageBox.RejectRole)
                 dialog.setDefaultButton(download_button)
                 dialog.exec()
@@ -1296,7 +1358,7 @@ class MainWindow(QMainWindow):
                     self.tabs.setCurrentWidget(self.models_tab)
                     self.select_model_row(model_name)
                     self.download_selected()
-                elif clicked == convert_button:
+                elif convert_button is not None and clicked == convert_button:
                     self.tabs.setCurrentWidget(self.models_tab)
                     self.select_model_row(model_name)
                     self.convert_selected_model()
@@ -1313,21 +1375,34 @@ class MainWindow(QMainWindow):
         self.readiness_timer.setInterval(700)
         self.update_state()
 
-        args = [
-            "-u",
-            "-m",
-            "tinyjev_gui.serve",
-            "--model",
-            model_name,
-            "--device",
-            device,
-            "--host",
-            host,
-            "--port",
-            str(port),
-        ]
+        if is_frozen_app():
+            args = [
+                "--serve",
+                "--model",
+                model_name,
+                "--device",
+                device,
+                "--host",
+                host,
+                "--port",
+                str(port),
+            ]
+        else:
+            args = [
+                "-u",
+                "-m",
+                "tinyjev_gui.serve",
+                "--model",
+                model_name,
+                "--device",
+                device,
+                "--host",
+                host,
+                "--port",
+                str(port),
+            ]
 
-        if device == "vulkan":
+        if device in {"vulkan", "cpu"}:
             args.extend(["--quant", selected_quant])
 
         threshold = self.active_safety_threshold()
@@ -1440,8 +1515,11 @@ class MainWindow(QMainWindow):
         self.convert_btn.setEnabled(not convert_running and not downloading)
         self.setup_gpu_btn.setEnabled(not gpu_setup_running and not convert_running)
         if hasattr(self, "gguf_quant_combo"):
-            self.gguf_quant_combo.setEnabled(self.gguf_quant_combo.count() > 1 and not downloading and not running)
-            self.gguf_quant_label.setEnabled(self.gguf_quant_combo.count() > 1 and not running)
+            show_quant = self.uses_gguf_downloads()
+            self.gguf_quant_combo.setVisible(show_quant)
+            self.gguf_quant_label.setVisible(show_quant)
+            self.gguf_quant_combo.setEnabled(show_quant and self.gguf_quant_combo.count() > 1 and not downloading and not running)
+            self.gguf_quant_label.setEnabled(show_quant and self.gguf_quant_combo.count() > 1 and not running)
 
         if hasattr(self, "tray_toggle_action"):
             self.tray_toggle_action.setText("Stop server" if running else "Start server")
@@ -1805,7 +1883,7 @@ class MainWindow(QMainWindow):
             )
             return "downloading", text, downloaded
 
-        if self.selected_device() == "vulkan":
+        if self.uses_gguf_downloads():
             return self.model_status_for_vulkan(entry)
 
         repo_info, folder = self.find_cached_repo(entry.repo_id, repo_map)
@@ -1934,7 +2012,7 @@ class MainWindow(QMainWindow):
         allow_patterns = None
         quant = None
 
-        if device == "vulkan":
+        if device in {"vulkan", "cpu"}:
             quant = self.selected_gguf_quant(model_name)
             repo_id = gguf_repo_id(model_name)
             allow_patterns = gguf_allow_patterns(model_name, quant)
@@ -2047,7 +2125,7 @@ class MainWindow(QMainWindow):
             self.download_info.setText("Cancelling...")
 
     def cache_repo_for_model(self, entry):
-        if self.selected_device() == "vulkan":
+        if self.uses_gguf_downloads():
             return gguf_repo_id(entry.name)
         return entry.repo_id
 
@@ -2151,11 +2229,12 @@ class MainWindow(QMainWindow):
         event.accept()
 
 
-def main():
-    args = list(sys.argv)
-    start_minimized = "--minimized" in args
+def main(argv=None):
+    cli_args = list(sys.argv[1:] if argv is None else argv)
+    start_minimized = "--minimized" in cli_args
     if start_minimized:
-        args = [arg for arg in args if arg != "--minimized"]
+        cli_args = [arg for arg in cli_args if arg != "--minimized"]
+    args = [sys.argv[0], *cli_args]
 
     username = getpass.getuser().strip() or "user"
     safe_username = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in username)
