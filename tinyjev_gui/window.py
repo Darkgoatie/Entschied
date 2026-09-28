@@ -76,6 +76,7 @@ from .workers import (
     ModelMetadataWorker,
     RequestWorker,
 )
+from .runtime import NO_WINDOW
 
 DEFAULT_SAFETY_THRESHOLD = 0.70
 
@@ -1450,6 +1451,7 @@ class MainWindow(QMainWindow):
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     check=False,
+                    creationflags=NO_WINDOW,
                 )
             except Exception as exc:
                 self.log.appendPlainText(f"taskkill failed: {exc}")

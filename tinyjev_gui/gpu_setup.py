@@ -7,6 +7,7 @@ import sys
 import venv
 from pathlib import Path
 from typing import Callable
+from .runtime import NO_WINDOW
 
 
 def default_runtime_dir() -> Path:
@@ -28,7 +29,7 @@ def run_cmd(
         raise RuntimeError("OPERATION_CANCELLED")
 
     log(f"> {' '.join(cmd)}")
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, creationflags=NO_WINDOW)
     if on_process_start is not None:
         on_process_start(proc)
 

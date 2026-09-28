@@ -2,6 +2,7 @@ import importlib
 import sys
 
 from .window import MainWindow, main as window_main
+from .runtime import NO_WINDOW
 
 __all__ = ["MainWindow", "main"]
 
@@ -38,7 +39,7 @@ def run_self_test() -> int:
         if server is None:
             print("self-test failed: bundled llama-server.exe not found", file=sys.stderr)
             return 1
-        result = subprocess.run([str(server), "--version"], capture_output=True, text=True, timeout=60)
+        result = subprocess.run([str(server), "--version"], capture_output=True, text=True, timeout=60, creationflags=NO_WINDOW)
         if result.returncode != 0:
             print(f"self-test failed: {server} --version exited {result.returncode}", file=sys.stderr)
             return 1

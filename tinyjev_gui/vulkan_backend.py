@@ -13,6 +13,7 @@ import httpx
 import numpy as np
 
 from .vulkan_setup import find_llama_server, llama_has_vulkan, preferred_gguf
+from .runtime import NO_WINDOW
 
 _kill_job = None
 
@@ -245,6 +246,7 @@ class LlamaServerHandle:
             text=True,
             encoding="utf-8",
             errors="replace",
+            creationflags=NO_WINDOW,
         )
         _bind_to_this_process(process)
         handle = cls(

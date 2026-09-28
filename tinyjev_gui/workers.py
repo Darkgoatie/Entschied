@@ -10,6 +10,7 @@ from huggingface_hub import HfApi, constants as hf_constants, snapshot_download
 from PySide6.QtCore import QThread, Signal
 
 from .vulkan_setup import convert_model_to_gguf
+from .runtime import NO_WINDOW
 
 
 class RequestWorker(QThread):
@@ -227,6 +228,7 @@ class GpuRuntimeSetupWorker(QThread):
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     check=False,
+                    creationflags=NO_WINDOW,
                 )
             else:
                 process.kill()
@@ -287,6 +289,7 @@ class GgufConvertWorker(QThread):
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     check=False,
+                    creationflags=NO_WINDOW,
                 )
             else:
                 process.kill()

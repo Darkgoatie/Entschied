@@ -14,6 +14,7 @@ from typing import Callable
 from huggingface_hub import snapshot_download, try_to_load_from_cache
 
 from .runtime import app_root, is_frozen_app
+from .runtime import NO_WINDOW
 
 LLAMA_COMMIT = "5266f24da"
 LLAMA_BUNDLED_TAG = "b11236"
@@ -348,6 +349,7 @@ def llama_has_vulkan(executable: str) -> bool:
             capture_output=True,
             text=True,
             timeout=20,
+            creationflags=NO_WINDOW,
         )
     except Exception:
         return False
@@ -477,6 +479,7 @@ def _run_logged(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        creationflags=NO_WINDOW,
     )
     if on_process_start is not None:
         on_process_start(proc)

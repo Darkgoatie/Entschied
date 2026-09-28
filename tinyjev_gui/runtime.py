@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import importlib.util
 import sys
 from pathlib import Path
@@ -29,3 +30,7 @@ def torch_available() -> bool:
 
 def directml_available() -> bool:
     return module_available("torch_directml")
+
+
+# Console children of a windowed exe otherwise each get their own empty console window.
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
