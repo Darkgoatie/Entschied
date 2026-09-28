@@ -10,10 +10,35 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Callable
 
-from huggingface_hub import snapshot_download
+from huggingface_hub import snapshot_download, try_to_load_from_cache
 
 LLAMA_COMMIT = "5266f24da"
 DIRECTML_SIZE_LIMIT_BYTES = int(5.5 * 1024**3)
+GGUF_SUPPORT_FILES = [
+    "head.safetensors",
+    "tinyjev.json",
+    "config.json",
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "README.md",
+]
+GGUF_SOURCES = {
+    "TinyJev-0.6B": {
+        "repo_id": "darkgoatie/TinyJev-0.6B-GGUF",
+        "default_quant": "f16",
+        "quants": {
+            "f16": "TinyJev-0.6B-f16.gguf",
+        },
+    },
+    "TinyJev-4B": {
+        "repo_id": "darkgoatie/TinyJev-4B-GGUF",
+        "default_quant": "f16",
+        "quants": {
+            "f16": "TinyJev-4B-F16.gguf",
+            "q8_0": "TinyJev-4B-Q8_0.gguf",
+        },
+    },
+}
 
 
 def _log_default(message: str) -> None:
@@ -25,6 +50,9 @@ def local_appdata() -> Path:
 
 
 def gguf_dir() -> Path:
+    override = os.environ.get("TINYJEV_GGUF_DIR", "").strip()
+    if override:
+        return Path(override)
     return local_appdata() / "TinyJev" / "gguf"
 
 
@@ -44,18 +72,172 @@ def gguf_targets(model_name: str) -> list[tuple[str, Path]]:
     return targets.get(model_name, [])
 
 
+def gguf_repo_id(model_name: str) -> str:
+    source = GGUF_SOURCES.get(model_name)
+    if source is None:
+        raise KeyError(f"No GGUF source configured for {model_name}")
+    return str(source["repo_id"])
+
+
+def gguf_quants(model_name: str) -> list[str]:
+    source = GGUF_SOURCES.get(model_name)
+    if source is None:
+        return []
+    quants = source.get("quants", {})
+    return [str(item) for item in quants]
+
+
+def default_gguf_quant(model_name: str) -> str:
+    source = GGUF_SOURCES.get(model_name)
+    if source is None:
+        return "f16"
+    return str(source.get("default_quant", "f16"))
+
+
+def resolve_gguf_quant(model_name: str, preferred_quant: str | None = None) -> str:
+    quants = gguf_quants(model_name)
+    wanted = []
+    if preferred_quant:
+        wanted.append(preferred_quant)
+
+    env_quant = os.environ.get("TINYJEV_GGUF_QUANT", "").strip()
+    if env_quant:
+        wanted.append(env_quant)
+
+    wanted.append(default_gguf_quant(model_name))
+
+    for quant in wanted:
+        if quant in quants:
+            return quant
+    if quants:
+        return quants[0]
+    return "f16"
+
+
+def gguf_filename(model_name: str, quant: str) -> str:
+    source = GGUF_SOURCES.get(model_name)
+    if source is None:
+        raise KeyError(f"No GGUF source configured for {model_name}")
+    quants = source.get("quants", {})
+    filename = quants.get(quant)
+    if filename is None:
+        raise KeyError(f"No GGUF quant {quant} for {model_name}")
+    return str(filename)
+
+
+def gguf_allow_patterns(model_name: str, preferred_quant: str | None = None) -> list[str]:
+    quant = resolve_gguf_quant(model_name, preferred_quant)
+    return [gguf_filename(model_name, quant), *GGUF_SUPPORT_FILES]
+
+
+def cached_gguf_file(model_name: str, quant: str) -> Path | None:
+    try:
+        cached = try_to_load_from_cache(
+            repo_id=gguf_repo_id(model_name),
+            filename=gguf_filename(model_name, quant),
+            repo_type="model",
+        )
+    except Exception:
+        return None
+
+    if isinstance(cached, str):
+        path = Path(cached)
+        if path.exists():
+            return path
+    return None
+
+
+def cached_gguf_bundle(model_name: str, preferred_quant: str | None = None) -> dict[str, object]:
+    quant = resolve_gguf_quant(model_name, preferred_quant)
+    filenames = gguf_allow_patterns(model_name, quant)
+    files: dict[str, Path] = {}
+    total_bytes = 0
+    for filename in filenames:
+        try:
+            cached = try_to_load_from_cache(
+                repo_id=gguf_repo_id(model_name),
+                filename=filename,
+                repo_type="model",
+            )
+        except Exception:
+            cached = None
+        if isinstance(cached, str):
+            path = Path(cached)
+            if path.exists():
+                files[filename] = path
+                total_bytes += path.stat().st_size
+
+    return {
+        "model": model_name,
+        "quant": quant,
+        "repo_id": gguf_repo_id(model_name),
+        "files": files,
+        "bytes": total_bytes,
+        "ready": len(files) == len(filenames),
+        "found": len(files),
+        "expected": len(filenames),
+    }
+
+
+def resolve_gguf_snapshot(
+    model_name: str,
+    preferred_quant: str | None = None,
+    local_files_only: bool = True,
+) -> tuple[Path, Path, str]:
+    quant = resolve_gguf_quant(model_name, preferred_quant)
+    snapshot = Path(
+        snapshot_download(
+            repo_id=gguf_repo_id(model_name),
+            local_files_only=local_files_only,
+            allow_patterns=gguf_allow_patterns(model_name, quant),
+        )
+    )
+    gguf_path = snapshot / gguf_filename(model_name, quant)
+    if not gguf_path.exists():
+        raise FileNotFoundError(f"Missing {gguf_path.name} in snapshot for {model_name}")
+    return snapshot, gguf_path, quant
+
+
 def gguf_status(model_name: str) -> list[dict[str, object]]:
     rows = []
-    for quant, path in gguf_targets(model_name):
-        if path.exists():
-            rows.append({
+    for quant, local_path in gguf_targets(model_name):
+        cache_path = cached_gguf_file(model_name, quant)
+        if cache_path is not None:
+            rows.append(
+                {
+                    "quant": quant,
+                    "source": "downloaded",
+                    "path": cache_path,
+                    "local_path": local_path,
+                    "exists": True,
+                    "bytes": cache_path.stat().st_size,
+                }
+            )
+            continue
+
+        if local_path.exists():
+            rows.append(
+                {
+                    "quant": quant,
+                    "source": "converted",
+                    "path": local_path,
+                    "local_path": local_path,
+                    "exists": True,
+                    "bytes": local_path.stat().st_size,
+                }
+            )
+            continue
+
+        rows.append(
+            {
                 "quant": quant,
-                "path": path,
-                "exists": True,
-                "bytes": path.stat().st_size,
-            })
-        else:
-            rows.append({"quant": quant, "path": path, "exists": False, "bytes": 0})
+                "source": "not_downloaded",
+                "path": local_path,
+                "local_path": local_path,
+                "exists": False,
+                "bytes": 0,
+            }
+        )
     return rows
 
 

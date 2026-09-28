@@ -62,12 +62,13 @@ class DownloadWorker(QThread):
     progress = Signal(str, object, object, float)
     finished_model = Signal(str, bool, str)
 
-    def __init__(self, model_name, repo_id, initial_bytes=0, total_hint=0):
+    def __init__(self, model_name, repo_id, initial_bytes=0, total_hint=0, allow_patterns=None):
         super().__init__()
         self.model_name = model_name
         self.repo_id = repo_id
         self.initial_bytes = max(0, int(initial_bytes))
         self.total_hint = max(0, int(total_hint))
+        self.allow_patterns = [str(item) for item in (allow_patterns or [])]
         self._cancel_event = threading.Event()
         self._downloaded_delta = 0
 
@@ -76,10 +77,19 @@ class DownloadWorker(QThread):
 
     def run(self):
         total_bytes = self.total_hint
+        patterns = set(self.allow_patterns)
         try:
             api = HfApi()
             info = api.model_info(self.repo_id, files_metadata=True)
-            sized = [entry.size for entry in info.siblings if getattr(entry, "size", None)]
+            sized = []
+            for entry in info.siblings:
+                size = getattr(entry, "size", None)
+                if not size:
+                    continue
+                name = getattr(entry, "rfilename", "")
+                if patterns and name not in patterns:
+                    continue
+                sized.append(int(size))
             if sized:
                 total_bytes = int(sum(sized))
         except Exception:
@@ -124,6 +134,7 @@ class DownloadWorker(QThread):
                 local_files_only=False,
                 max_workers=1,
                 tqdm_class=ProgressTqdm,
+                allow_patterns=self.allow_patterns or None,
             )
 
             final_bytes = max(self.initial_bytes + self._downloaded_delta, total_bytes)
