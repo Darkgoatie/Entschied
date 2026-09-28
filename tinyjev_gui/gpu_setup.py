@@ -18,18 +18,47 @@ def runtime_python(runtime_dir: Path) -> Path:
     return runtime_dir / "Scripts" / "python.exe"
 
 
-def run_cmd(cmd: list[str], log: Callable[[str], None]) -> None:
+def run_cmd(
+    cmd: list[str],
+    log: Callable[[str], None],
+    cancel_event=None,
+    on_process_start: Callable[[subprocess.Popen | None], None] | None = None,
+) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise RuntimeError("OPERATION_CANCELLED")
+
     log(f"> {' '.join(cmd)}")
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    assert proc.stdout is not None
-    for line in proc.stdout:
-        log(line.rstrip())
-    code = proc.wait()
+    if on_process_start is not None:
+        on_process_start(proc)
+
+    try:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            if cancel_event is not None and cancel_event.is_set():
+                proc.kill()
+                proc.wait()
+                raise RuntimeError("OPERATION_CANCELLED")
+            log(line.rstrip())
+        code = proc.wait()
+    finally:
+        if on_process_start is not None:
+            on_process_start(None)
+
+    if cancel_event is not None and cancel_event.is_set():
+        raise RuntimeError("OPERATION_CANCELLED")
+
     if code != 0:
         raise RuntimeError(f"Command failed with exit code {code}: {' '.join(cmd)}")
 
 
-def ensure_gpu_runtime(runtime_dir: Path | None = None, repo_root: Path | None = None, log: Callable[[str], None] | None = None) -> Path:
+def ensure_gpu_runtime(
+    runtime_dir: Path | None = None,
+    repo_root: Path | None = None,
+    log: Callable[[str], None] | None = None,
+    cancel_event=None,
+    on_process_start: Callable[[subprocess.Popen | None], None] | None = None,
+) -> Path:
     runtime_dir = Path(runtime_dir or default_runtime_dir())
     repo_root = Path(repo_root or Path(__file__).resolve().parents[1])
     log = log or (lambda msg: print(msg, flush=True))
@@ -41,10 +70,30 @@ def ensure_gpu_runtime(runtime_dir: Path | None = None, repo_root: Path | None =
     else:
         log(f"Using existing runtime at {runtime_dir}")
 
-    run_cmd([str(py), "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"], log)
-    run_cmd([str(py), "-m", "pip", "install", "--no-deps", "-e", str(repo_root)], log)
-    run_cmd([str(py), "-m", "pip", "install", "tinyjev", "torch-directml", "transformers<5,>=4.40"], log)
-    run_cmd([str(py), "-c", "import tinyjev,torch_directml,transformers; print(torch_directml.device())"], log)
+    run_cmd(
+        [str(py), "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"],
+        log,
+        cancel_event=cancel_event,
+        on_process_start=on_process_start,
+    )
+    run_cmd(
+        [str(py), "-m", "pip", "install", "--no-deps", "-e", str(repo_root)],
+        log,
+        cancel_event=cancel_event,
+        on_process_start=on_process_start,
+    )
+    run_cmd(
+        [str(py), "-m", "pip", "install", "tinyjev", "torch-directml", "transformers<5,>=4.40"],
+        log,
+        cancel_event=cancel_event,
+        on_process_start=on_process_start,
+    )
+    run_cmd(
+        [str(py), "-c", "import tinyjev,torch_directml,transformers; print(torch_directml.device())"],
+        log,
+        cancel_event=cancel_event,
+        on_process_start=on_process_start,
+    )
 
     return py
 

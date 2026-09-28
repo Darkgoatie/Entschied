@@ -415,7 +415,16 @@ def _convert_workspace() -> tuple[Path, Path]:
     return llama_repo, venv_dir
 
 
-def _run_logged(cmd: list[str], log: Callable[[str], None], cwd: Path | None = None) -> None:
+def _run_logged(
+    cmd: list[str],
+    log: Callable[[str], None],
+    cwd: Path | None = None,
+    cancel_event=None,
+    on_process_start: Callable[[subprocess.Popen | None], None] | None = None,
+) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise RuntimeError("OPERATION_CANCELLED")
+
     log(f"> {' '.join(cmd)}")
     proc = subprocess.Popen(
         cmd,
@@ -424,15 +433,34 @@ def _run_logged(cmd: list[str], log: Callable[[str], None], cwd: Path | None = N
         stderr=subprocess.STDOUT,
         text=True,
     )
-    assert proc.stdout is not None
-    for line in proc.stdout:
-        log(line.rstrip())
-    code = proc.wait()
+    if on_process_start is not None:
+        on_process_start(proc)
+
+    try:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            if cancel_event is not None and cancel_event.is_set():
+                proc.kill()
+                proc.wait()
+                raise RuntimeError("OPERATION_CANCELLED")
+            log(line.rstrip())
+        code = proc.wait()
+    finally:
+        if on_process_start is not None:
+            on_process_start(None)
+
+    if cancel_event is not None and cancel_event.is_set():
+        raise RuntimeError("OPERATION_CANCELLED")
+
     if code != 0:
         raise RuntimeError(f"Command failed ({code}): {' '.join(cmd)}")
 
 
-def ensure_convert_tooling(log: Callable[[str], None] | None = None) -> tuple[Path, Path]:
+def ensure_convert_tooling(
+    log: Callable[[str], None] | None = None,
+    cancel_event=None,
+    on_process_start: Callable[[subprocess.Popen | None], None] | None = None,
+) -> tuple[Path, Path]:
     log = log or _log_default
 
     env_py = os.environ.get("TINYJEV_CONVERT_PYTHON", "").strip()
@@ -447,30 +475,76 @@ def ensure_convert_tooling(log: Callable[[str], None] | None = None) -> tuple[Pa
     py = venv_dir / "Scripts" / "python.exe"
     script = repo_dir / "convert_hf_to_gguf.py"
 
+    if cancel_event is not None and cancel_event.is_set():
+        raise RuntimeError("OPERATION_CANCELLED")
+
     if not repo_dir.exists():
         repo_dir.parent.mkdir(parents=True, exist_ok=True)
-        _run_logged(["git", "clone", "--filter=blob:none", "https://github.com/ggerganov/llama.cpp", str(repo_dir)], log)
+        _run_logged(
+            ["git", "clone", "--filter=blob:none", "https://github.com/ggerganov/llama.cpp", str(repo_dir)],
+            log,
+            cancel_event=cancel_event,
+            on_process_start=on_process_start,
+        )
 
-    _run_logged(["git", "checkout", LLAMA_COMMIT], log, cwd=repo_dir)
+    _run_logged(
+        ["git", "checkout", LLAMA_COMMIT],
+        log,
+        cwd=repo_dir,
+        cancel_event=cancel_event,
+        on_process_start=on_process_start,
+    )
 
     if not py.exists():
-        _run_logged(["python", "-m", "venv", str(venv_dir)], log)
+        _run_logged(
+            ["python", "-m", "venv", str(venv_dir)],
+            log,
+            cancel_event=cancel_event,
+            on_process_start=on_process_start,
+        )
 
-    _run_logged([str(py), "-m", "pip", "install", "--upgrade", "pip"], log)
-    _run_logged([str(py), "-m", "pip", "install", "-r", str(repo_dir / "requirements" / "requirements-convert_hf_to_gguf.txt")], log)
-    _run_logged([str(py), "-m", "pip", "install", "gguf"], log)
+    _run_logged(
+        [str(py), "-m", "pip", "install", "--upgrade", "pip"],
+        log,
+        cancel_event=cancel_event,
+        on_process_start=on_process_start,
+    )
+    _run_logged(
+        [str(py), "-m", "pip", "install", "-r", str(repo_dir / "requirements" / "requirements-convert_hf_to_gguf.txt")],
+        log,
+        cancel_event=cancel_event,
+        on_process_start=on_process_start,
+    )
+    _run_logged(
+        [str(py), "-m", "pip", "install", "gguf"],
+        log,
+        cancel_event=cancel_event,
+        on_process_start=on_process_start,
+    )
 
     return py, script
 
 
-def convert_model_to_gguf(model_name: str, log: Callable[[str], None] | None = None) -> list[Path]:
+def convert_model_to_gguf(
+    model_name: str,
+    log: Callable[[str], None] | None = None,
+    cancel_event=None,
+    on_process_start: Callable[[subprocess.Popen | None], None] | None = None,
+) -> list[Path]:
     log = log or _log_default
+
+    if cancel_event is not None and cancel_event.is_set():
+        raise RuntimeError("OPERATION_CANCELLED")
 
     snapshot = resolve_snapshot(model_name, local_files_only=True)
     if not snapshot.exists():
         raise FileNotFoundError(f"Model files for {model_name} are not available locally.")
 
-    py, script = ensure_convert_tooling(log)
+    py, script = ensure_convert_tooling(
+        log,
+        cancel_event=cancel_event,
+        on_process_start=on_process_start,
+    )
     gguf_dir().mkdir(parents=True, exist_ok=True)
 
     outputs: list[Path] = []
@@ -489,7 +563,12 @@ def convert_model_to_gguf(model_name: str, log: Callable[[str], None] | None = N
             "--outfile",
             str(output),
         ]
-        _run_logged(cmd, log)
+        _run_logged(
+            cmd,
+            log,
+            cancel_event=cancel_event,
+            on_process_start=on_process_start,
+        )
         outputs.append(output)
 
     return outputs

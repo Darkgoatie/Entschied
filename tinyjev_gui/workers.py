@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import threading
 from pathlib import Path
 
@@ -155,6 +156,35 @@ class GpuRuntimeSetupWorker(QThread):
         super().__init__()
         self.runtime_dir = Path(runtime_dir)
         self.repo_root = Path(repo_root)
+        self._cancel_event = threading.Event()
+        self._process_lock = threading.Lock()
+        self._active_process = None
+
+    def _set_active_process(self, process):
+        with self._process_lock:
+            self._active_process = process
+
+    def _kill_active_process(self):
+        with self._process_lock:
+            process = self._active_process
+        if process is None or process.poll() is not None:
+            return
+        try:
+            if os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
+            else:
+                process.kill()
+        except Exception:
+            pass
+
+    def cancel(self):
+        self._cancel_event.set()
+        self._kill_active_process()
 
     def run(self):
         try:
@@ -162,10 +192,17 @@ class GpuRuntimeSetupWorker(QThread):
                 runtime_dir=self.runtime_dir,
                 repo_root=self.repo_root,
                 log=lambda msg: self.log.emit(str(msg)),
+                cancel_event=self._cancel_event,
+                on_process_start=self._set_active_process,
             )
         except Exception as exc:
-            self.done.emit(False, str(exc))
+            if self._cancel_event.is_set() and "OPERATION_CANCELLED" in str(exc):
+                self.done.emit(False, "Cancelled")
+            else:
+                self.done.emit(False, str(exc))
             return
+        finally:
+            self._set_active_process(None)
 
         self.done.emit(True, str(py))
 
@@ -177,13 +214,52 @@ class GgufConvertWorker(QThread):
     def __init__(self, model_name):
         super().__init__()
         self.model_name = model_name
+        self._cancel_event = threading.Event()
+        self._process_lock = threading.Lock()
+        self._active_process = None
+
+    def _set_active_process(self, process):
+        with self._process_lock:
+            self._active_process = process
+
+    def _kill_active_process(self):
+        with self._process_lock:
+            process = self._active_process
+        if process is None or process.poll() is not None:
+            return
+        try:
+            if os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
+            else:
+                process.kill()
+        except Exception:
+            pass
+
+    def cancel(self):
+        self._cancel_event.set()
+        self._kill_active_process()
 
     def run(self):
         try:
-            outputs = convert_model_to_gguf(self.model_name, log=lambda msg: self.log.emit(str(msg)))
+            outputs = convert_model_to_gguf(
+                self.model_name,
+                log=lambda msg: self.log.emit(str(msg)),
+                cancel_event=self._cancel_event,
+                on_process_start=self._set_active_process,
+            )
         except Exception as exc:
-            self.done.emit(False, str(exc))
+            if self._cancel_event.is_set() and "OPERATION_CANCELLED" in str(exc):
+                self.done.emit(False, "Cancelled")
+            else:
+                self.done.emit(False, str(exc))
             return
+        finally:
+            self._set_active_process(None)
 
         text = ", ".join(str(path) for path in outputs)
         self.done.emit(True, text)

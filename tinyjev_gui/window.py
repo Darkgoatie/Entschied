@@ -563,24 +563,55 @@ class MainWindow(QMainWindow):
         if payload == "show":
             self.show_from_tray()
 
+    def active_work_labels(self):
+        labels = []
+        if self.download_worker and self.download_worker.isRunning():
+            labels.append("download")
+        if self.gpu_setup_worker and self.gpu_setup_worker.isRunning():
+            labels.append("DirectML runtime setup")
+        if self.convert_worker and self.convert_worker.isRunning():
+            labels.append("GGUF conversion")
+        if self.proc.state() != QProcess.NotRunning:
+            labels.append("server")
+        return labels
+
+    def confirm_quit_if_busy(self):
+        labels = self.active_work_labels()
+        if not labels:
+            return True
+        text = ", ".join(labels)
+        answer = QMessageBox.question(
+            self,
+            "Quit TinyJev Server",
+            f"{text} is still running. Quit anyway?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        return answer == QMessageBox.Yes
+
     def cleanup_for_exit(self):
         self.models_timer.stop()
 
         if self.download_worker and self.download_worker.isRunning():
             self.download_worker.cancel()
-            self.download_worker.wait(6000)
+            self.download_info.setText("Cancelling download...")
+            self.download_worker.wait(15000)
 
         if self.gpu_setup_worker and self.gpu_setup_worker.isRunning():
-            self.gpu_setup_worker.wait(1000)
+            self.gpu_setup_worker.cancel()
+            self.gpu_setup_worker.wait(15000)
 
         if self.convert_worker and self.convert_worker.isRunning():
-            self.convert_worker.wait(1000)
+            self.convert_worker.cancel()
+            self.convert_worker.wait(15000)
 
         self.stop_server()
         if hasattr(self, "tray_icon"):
             self.tray_icon.hide()
 
     def quit_from_tray(self):
+        if not self.confirm_quit_if_busy():
+            return
         self.is_quitting = True
         self.close()
 
@@ -671,10 +702,16 @@ class MainWindow(QMainWindow):
         if ok:
             self.download_info.setText(f"DirectML runtime ready: {message}")
             self.log.appendPlainText(f"DirectML runtime ready: {message}")
-        else:
-            self.download_info.setText("DirectML runtime setup failed")
-            self.log.appendPlainText(f"DirectML runtime setup failed: {message}")
-            QMessageBox.warning(self, "DirectML runtime", f"DirectML runtime setup failed: {message}")
+            return
+
+        if str(message).strip().lower() == "cancelled":
+            self.download_info.setText("DirectML runtime setup cancelled")
+            self.log.appendPlainText("DirectML runtime setup cancelled")
+            return
+
+        self.download_info.setText("DirectML runtime setup failed")
+        self.log.appendPlainText(f"DirectML runtime setup failed: {message}")
+        QMessageBox.warning(self, "DirectML runtime", f"DirectML runtime setup failed: {message}")
 
     def gpu_runtime_setup_finished(self):
         self.gpu_setup_worker = None
@@ -700,10 +737,16 @@ class MainWindow(QMainWindow):
         if ok:
             self.download_info.setText("GGUF conversion complete")
             self.log.appendPlainText(f"GGUF conversion complete: {message}")
-        else:
-            self.download_info.setText("GGUF conversion failed")
-            self.log.appendPlainText(f"GGUF conversion failed: {message}")
-            QMessageBox.warning(self, "GGUF conversion", f"Conversion failed: {message}")
+            return
+
+        if str(message).strip().lower() == "cancelled":
+            self.download_info.setText("GGUF conversion cancelled")
+            self.log.appendPlainText("GGUF conversion cancelled")
+            return
+
+        self.download_info.setText("GGUF conversion failed")
+        self.log.appendPlainText(f"GGUF conversion failed: {message}")
+        QMessageBox.warning(self, "GGUF conversion", f"Conversion failed: {message}")
 
     def convert_thread_finished(self):
         self.convert_worker = None
@@ -1930,6 +1973,10 @@ class MainWindow(QMainWindow):
 
         if hasattr(self, "tray_icon") and self.tray_icon.isVisible():
             self.hide()
+            event.ignore()
+            return
+
+        if not self.confirm_quit_if_busy():
             event.ignore()
             return
 
