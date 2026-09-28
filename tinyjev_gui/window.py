@@ -172,6 +172,8 @@ class MainWindow(QMainWindow):
         self.models_timer.timeout.connect(self.refresh_model_table)
 
         self.server_ready = False
+        self.has_seen_ready = False
+        self.unexpected_stop_message = ""
         self.health_worker = None
         self.worker = None
         self.download_worker = None
@@ -1158,7 +1160,10 @@ class MainWindow(QMainWindow):
 
         self.stop_requested = False
         self.server_ready = False
+        self.has_seen_ready = False
+        self.unexpected_stop_message = ""
         self.safety_hint_visible = False
+        self.readiness_timer.setInterval(700)
         self.update_state()
 
         args = [
@@ -1197,6 +1202,8 @@ class MainWindow(QMainWindow):
             return
         self.readiness_timer.stop()
         self.server_ready = False
+        self.has_seen_ready = False
+        self.unexpected_stop_message = ""
         self.stop_requested = True
         self.log.appendPlainText("Stopping server...")
         self.stop_process_tree()
@@ -1247,14 +1254,19 @@ class MainWindow(QMainWindow):
         self.health_worker = None
 
     def handle_health(self, ready):
-        if ready and not self.server_ready:
+        if ready:
+            if not self.server_ready:
+                self.log.appendPlainText("Server is ready.")
             self.server_ready = True
-            self.readiness_timer.stop()
-            self.log.appendPlainText("Server is ready.")
-        elif not ready and self.server_ready:
+            self.has_seen_ready = True
+            if self.readiness_timer.interval() != 5000:
+                self.readiness_timer.setInterval(5000)
+        else:
+            if self.server_ready:
+                self.log.appendPlainText("Server readiness check failed.")
             self.server_ready = False
-            self.readiness_timer.start()
-            self.log.appendPlainText("Server readiness check failed.")
+            if self.has_seen_ready and self.readiness_timer.interval() != 5000:
+                self.readiness_timer.setInterval(5000)
         self.update_state()
 
     def update_state(self, *_):
@@ -1289,9 +1301,14 @@ class MainWindow(QMainWindow):
         elif running:
             if self.safety_hint_visible:
                 self.status.setText("Safety threshold change will apply on next start")
+            elif self.has_seen_ready:
+                self.status.setText("Not responding")
             else:
                 self.status.setText(f"Starting on {self.base_url()}")
         else:
+            if self.unexpected_stop_message:
+                self.status.setText(self.unexpected_stop_message)
+                return
             selected_model = self.selected_model_name()
             if self.model_is_downloaded(selected_model):
                 self.status.setText("Stopped")
@@ -1302,12 +1319,20 @@ class MainWindow(QMainWindow):
         self.readiness_timer.stop()
         was_ready = self.server_ready
         self.server_ready = False
+        self.has_seen_ready = False
         status_name = "normal" if exit_status == QProcess.NormalExit else "crashed"
         self.log.appendPlainText(f"Server process exited ({status_name}, code {exit_code}).")
 
+        unexpected_exit = not self.stop_requested
+        if unexpected_exit:
+            self.unexpected_stop_message = f"Server stopped unexpectedly (exit code {exit_code})"
+            self.log.appendPlainText(self.unexpected_stop_message)
+        else:
+            self.unexpected_stop_message = ""
+
         should_offer_cpu = (
             self.last_start_device in {"gpu", "vulkan"}
-            and not self.stop_requested
+            and unexpected_exit
             and not was_ready
         )
         self.stop_requested = False
