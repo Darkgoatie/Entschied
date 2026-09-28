@@ -1,3 +1,4 @@
+import getpass
 import json
 import shutil
 import socket
@@ -8,8 +9,9 @@ from pathlib import Path
 
 from huggingface_hub import HfApi, scan_cache_dir, try_to_load_from_cache
 from huggingface_hub.constants import HF_HUB_CACHE
-from PySide6.QtCore import QProcess, QSettings, Qt, QTimer, QUrl
+from PySide6.QtCore import QObject, QProcess, QSettings, Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QFont
+from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -90,6 +92,52 @@ EXAMPLES = {
         ),
     },
 }
+
+class SingleInstanceBridge(QObject):
+    def __init__(self, name, message_handler, parent=None):
+        super().__init__(parent)
+        self.name = name
+        self.message_handler = message_handler
+        self.server = QLocalServer(self)
+        self.server.newConnection.connect(self.handle_new_connection)
+
+    def listen(self):
+        if self.server.listen(self.name):
+            return True
+
+        probe = QLocalSocket()
+        probe.connectToServer(self.name)
+        if probe.waitForConnected(250):
+            probe.disconnectFromServer()
+            return False
+
+        QLocalServer.removeServer(self.name)
+        return self.server.listen(self.name)
+
+    @staticmethod
+    def send_message(name, message):
+        socket_client = QLocalSocket()
+        socket_client.connectToServer(name)
+        if not socket_client.waitForConnected(250):
+            return False
+        payload = (message + "\n").encode("utf-8")
+        socket_client.write(payload)
+        socket_client.flush()
+        socket_client.waitForBytesWritten(250)
+        socket_client.disconnectFromServer()
+        return True
+
+    def handle_new_connection(self):
+        while self.server.hasPendingConnections():
+            socket_client = self.server.nextPendingConnection()
+            if socket_client is None:
+                continue
+            socket_client.waitForReadyRead(250)
+            payload = bytes(socket_client.readAll()).decode("utf-8", errors="replace").strip()
+            socket_client.disconnectFromServer()
+            if payload:
+                self.message_handler(payload)
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -508,6 +556,10 @@ class MainWindow(QMainWindow):
         self.showNormal()
         self.raise_()
         self.activateWindow()
+
+    def handle_single_instance_message(self, payload):
+        if payload == "show":
+            self.show_from_tray()
 
     def cleanup_for_exit(self):
         self.models_timer.stop()
@@ -1867,17 +1919,29 @@ def main():
     if start_minimized:
         args = [arg for arg in args if arg != "--minimized"]
 
+    username = getpass.getuser().strip() or "user"
+    safe_username = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in username)
+    instance_name = f"TinyJevServerGUI-{safe_username}"
+    if SingleInstanceBridge.send_message(instance_name, "show"):
+        return 0
+
     app = QApplication(args)
     app.setQuitOnLastWindowClosed(False)
 
     window = MainWindow()
+    bridge = SingleInstanceBridge(instance_name, window.handle_single_instance_message, parent=window)
+    if not bridge.listen():
+        QMessageBox.warning(window, "Startup error", "TinyJev Server is already running.")
+        return 1
+    window.single_instance_bridge = bridge
+
     if start_minimized:
         window.hide()
     else:
         window.show()
 
-    sys.exit(app.exec())
+    return app.exec()
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
