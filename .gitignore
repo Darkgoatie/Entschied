@@ -3,4 +3,5 @@ __pycache__/
 *.pyc
 build/
 dist/
+app/llama/
 *.egg-info/
