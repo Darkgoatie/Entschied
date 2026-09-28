@@ -184,6 +184,7 @@ class MainWindow(QMainWindow):
         self.convert_worker = None
         self.last_start_device = None
         self.stop_requested = False
+        self.running_model_name = None
         self.safety_hint_visible = False
 
         self.host = QLineEdit(self.settings.value("host", "127.0.0.1"))
@@ -1231,12 +1232,14 @@ class MainWindow(QMainWindow):
             args.extend(["--min-confidence", f"{threshold:.2f}"])
 
         self.log.appendPlainText(f"> {executable} {' '.join(args)}")
+        self.running_model_name = None
         self.proc.start(executable, args)
         if not self.proc.waitForStarted(4000):
             self.log.appendPlainText("Failed to start server process.")
             self.update_state()
             return
 
+        self.running_model_name = model_name
         self.log.appendPlainText("Waiting for server readiness...")
         self.readiness_timer.start()
 
@@ -1363,6 +1366,7 @@ class MainWindow(QMainWindow):
         was_ready = self.server_ready
         self.server_ready = False
         self.has_seen_ready = False
+        self.running_model_name = None
         status_name = "normal" if exit_status == QProcess.NormalExit else "crashed"
         self.log.appendPlainText(f"Server process exited ({status_name}, code {exit_code}).")
 
@@ -1899,6 +1903,14 @@ class MainWindow(QMainWindow):
             return
         entry = self.model_by_name.get(model_name)
         if entry is None:
+            return
+
+        if self.proc.state() != QProcess.NotRunning and model_name == self.running_model_name:
+            QMessageBox.warning(
+                self,
+                "Model in use",
+                f"Cannot delete {model_name} while the server is running with this model. Stop the server first.",
+            )
             return
 
         if self.download_worker and self.download_worker.isRunning():
