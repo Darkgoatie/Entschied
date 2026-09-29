@@ -15,6 +15,7 @@ def run_self_test() -> int:
         "entschied.vulkan_setup",
         "entschied.vulkan_backend",
         "entschied.workers",
+        "entschied.jevk5",
         "entschied.serve",
         "entschied.window",
     ]

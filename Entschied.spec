@@ -45,6 +45,7 @@ a = Analysis(
         "transformers",
         "mcp",
         "entschied.mcp",
+        "entschied.jevk5",
         "entschied.gpu_backend",
     ],
     win_no_prefer_redirects=False,

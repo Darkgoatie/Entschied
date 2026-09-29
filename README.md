@@ -1,6 +1,11 @@
 # Entschied
 
-Run decision-maker AI models (TinyJev) locally.
+Run decision-maker AI models locally.
+
+Supported models:
+
+- TinyJev-0.6B, TinyJev-4B (pointer head on Qwen3)
+- JevK5-2B, JevK5-4B, JevK5-9B from [alibiserikbay/JevK5-GGUF](https://huggingface.co/alibiserikbay/JevK5-GGUF) (Apache-2.0). These read answer-letter log-probabilities from llama-server and apply each file's calibration temperature. They run on llama.cpp only (CPU or Vulkan).
 
 Desktop app for running a local [TinyJev](https://huggingface.co/AnkitAI/tinyjev-0.6b) server and using it as a fast decision layer.
 

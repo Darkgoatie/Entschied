@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
 )
 from tinyjev.registry import MODELS
 
+from .vulkan_setup import EXTRA_MODELS, gguf_expected_size, is_jevk5
 from .common import ModelEntry, human_size, make_item, normalize_repo_id
 from .runtime import directml_available, executable_path, is_frozen_app, torch_available
 
@@ -392,7 +393,7 @@ class MainWindow(QMainWindow):
 
     def load_model_entries(self):
         entries = []
-        for name, meta in MODELS.items():
+        for name, meta in {**MODELS, **EXTRA_MODELS}.items():
             entries.append(
                 ModelEntry(
                     name=name,
@@ -1185,7 +1186,7 @@ class MainWindow(QMainWindow):
         if self.metadata_worker and self.metadata_worker.isRunning():
             return
 
-        entries = [(entry.name, entry.repo_id) for entry in self.model_entries]
+        entries = [(entry.name, entry.repo_id) for entry in self.model_entries if not is_jevk5(entry.name)]
         self.metadata_worker = ModelMetadataWorker(entries=entries, timeout_seconds=2.5)
         self.metadata_worker.done.connect(self.model_metadata_loaded)
         self.metadata_worker.finished.connect(self.model_metadata_finished)
@@ -1971,6 +1972,8 @@ class MainWindow(QMainWindow):
         for row, entry in enumerate(self.model_entries):
             self.model_rows[entry.name] = row
             size_value = self.expected_sizes.get(entry.name)
+            if is_jevk5(entry.name):
+                size_value = gguf_expected_size(entry.name, self.selected_gguf_quant(entry.name))
             size_text = human_size(size_value) if size_value else "Unknown"
 
             status_code, status_text, disk_size = self.model_status_for_entry(entry, repo_map)

@@ -193,6 +193,7 @@ class LlamaServerHandle:
         host: str = "127.0.0.1",
         port: int | None = None,
         mode: Literal["vulkan", "cpu"] = "vulkan",
+        embeddings: bool = True,
     ) -> "LlamaServerHandle":
         executable = find_llama_server(auto_download=True)
         if mode == "vulkan" and not llama_has_vulkan(str(executable)):
@@ -224,9 +225,6 @@ class LlamaServerHandle:
             str(selected_port),
             "--ctx-size",
             str(ctx_size),
-            "--embeddings",
-            "--pooling",
-            "none",
             "--parallel",
             "1",
             "-ngl",
@@ -236,6 +234,8 @@ class LlamaServerHandle:
             "-ub",
             str(batch),
         ]
+        if embeddings:
+            cmd.extend(["--embeddings", "--pooling", "none"])
         if mode == "vulkan":
             cmd.extend(["--flash-attn", "on"])
 

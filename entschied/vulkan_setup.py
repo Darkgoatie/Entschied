@@ -28,6 +28,27 @@ GGUF_SUPPORT_FILES = [
     "tokenizer_config.json",
     "README.md",
 ]
+JEVK5_REPO = "alibiserikbay/JevK5-GGUF"
+EXTRA_MODELS = {
+    "JevK5-2B": {
+        "repo": JEVK5_REPO,
+        "family": "jevk5",
+        "params": "2B",
+        "what": "JevK5-2B v0.2, Qwen3.5 letter readout; fastest, weakest on hard items",
+    },
+    "JevK5-4B": {
+        "repo": JEVK5_REPO,
+        "family": "jevk5",
+        "params": "4B",
+        "what": "JevK5 v0.3 (4B), Qwen3.5 letter readout; #3 on JevBench (v0.2)",
+    },
+    "JevK5-9B": {
+        "repo": JEVK5_REPO,
+        "family": "jevk5",
+        "params": "9B",
+        "what": "JevK5-9B v0.3.3, Qwen3.5 letter readout; most accurate JevK5",
+    },
+}
 GGUF_SOURCES = {
     "TinyJev-0.6B": {
         "repo_id": "darkgoatie/TinyJev-0.6B-GGUF",
@@ -44,7 +65,62 @@ GGUF_SOURCES = {
             "q8_0": "TinyJev-4B-Q8_0.gguf",
         },
     },
+    "JevK5-2B": {
+        "repo_id": JEVK5_REPO,
+        "default_quant": "q8_0",
+        "support_files": [],
+        "quants": {"q8_0": "jevk5-2b-v0.2-Q8_0.gguf"},
+        "sizes": {"q8_0": 2_010_000_000},
+        "temperature": 1.42,
+        "knockout_temperature": 0.77,
+    },
+    "JevK5-4B": {
+        "repo_id": JEVK5_REPO,
+        "default_quant": "q8_0",
+        "support_files": [],
+        "quants": {
+            "q8_0": "jevk5-4b-v0.3-Q8_0.gguf",
+            "q5_k_m": "jevk5-4b-v0.3-Q5_K_M.gguf",
+            "q4_k_m": "jevk5-4b-v0.3-Q4_K_M.gguf",
+        },
+        "sizes": {"q8_0": 4_480_000_000, "q5_k_m": 3_070_000_000, "q4_k_m": 2_710_000_000},
+        "temperature": 1.22,
+        "knockout_temperature": 0.93,
+    },
+    "JevK5-9B": {
+        "repo_id": JEVK5_REPO,
+        "default_quant": "q5_k_m",
+        "support_files": [],
+        "quants": {
+            "q5_k_m": "jevk5-9b-v0.3.3-Q5_K_M.gguf",
+            "q8_0": "jevk5-9b-v0.3.3-Q8_0.gguf",
+        },
+        "sizes": {"q5_k_m": 6_470_000_000, "q8_0": 9_530_000_000},
+        "temperature": 1.316,
+        "knockout_temperature": 1.05,
+    },
 }
+
+
+def model_family(model_name: str) -> str:
+    meta = EXTRA_MODELS.get(model_name)
+    return str(meta["family"]) if meta else "pointer"
+
+
+def is_jevk5(model_name: str) -> bool:
+    return model_family(model_name) == "jevk5"
+
+
+def gguf_source(model_name: str) -> dict:
+    source = GGUF_SOURCES.get(model_name)
+    if source is None:
+        raise KeyError(f"No GGUF source configured for {model_name}")
+    return source
+
+
+def gguf_expected_size(model_name: str, quant: str) -> int:
+    source = GGUF_SOURCES.get(model_name) or {}
+    return int((source.get("sizes") or {}).get(quant, 0))
 
 
 def _log_default(message: str) -> None:
@@ -75,7 +151,12 @@ def gguf_targets(model_name: str) -> list[tuple[str, Path]]:
             ("q8_0", root / "tinyjev-4b-q8_0.gguf"),
         ],
     }
-    return targets.get(model_name, [])
+    if model_name in targets:
+        return targets[model_name]
+    source = GGUF_SOURCES.get(model_name)
+    if source is None:
+        return []
+    return [(quant, root / filename) for quant, filename in source["quants"].items()]
 
 
 def gguf_repo_id(model_name: str) -> str:
@@ -133,7 +214,8 @@ def gguf_filename(model_name: str, quant: str) -> str:
 
 def gguf_allow_patterns(model_name: str, preferred_quant: str | None = None) -> list[str]:
     quant = resolve_gguf_quant(model_name, preferred_quant)
-    return [gguf_filename(model_name, quant), *GGUF_SUPPORT_FILES]
+    support = gguf_source(model_name).get("support_files", GGUF_SUPPORT_FILES)
+    return [gguf_filename(model_name, quant), *support]
 
 
 def cached_gguf_file(model_name: str, quant: str) -> Path | None:

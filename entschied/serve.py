@@ -96,7 +96,44 @@ def _llama_cpp_agent(model_name: str, mode: str, quant: str | None = None):
     return agent
 
 
+def _jevk5_agent(model_name: str, mode: str, quant: str | None = None):
+    from .jevk5 import JevK5Agent
+    from .vulkan_backend import LlamaServerHandle
+    from .vulkan_setup import gguf_source, resolve_gguf_snapshot
+
+    _, gguf_path, selected_quant = resolve_gguf_snapshot(model_name, preferred_quant=quant, local_files_only=True)
+    port = os.environ.get("ENTSCHIED_LLAMA_PORT", "").strip()
+    handle = LlamaServerHandle.start(
+        model_name=model_name,
+        gguf_path=gguf_path,
+        host=os.environ.get("ENTSCHIED_LLAMA_HOST", "127.0.0.1"),
+        port=int(port) if port else None,
+        mode="cpu" if mode == "cpu" else "vulkan",
+        embeddings=False,
+    )
+    source = gguf_source(model_name)
+    agent = JevK5Agent(
+        name=model_name,
+        base_url=handle.base_url,
+        temperature=float(source["temperature"]),
+        knockout_temperature=source.get("knockout_temperature"),
+    )
+    agent.backbone = agent
+    agent._llama_server_handle = handle
+    agent._llama_gguf_path = str(gguf_path)
+    agent._llama_mode = mode
+    print(f"{model_name} {selected_quant} on llama.cpp ({mode}), temperature {agent.temperature}", flush=True)
+    return agent
+
+
 def load_agent(model_name: str, device: str, quant: str | None = None):
+    from .vulkan_setup import is_jevk5
+
+    if is_jevk5(model_name):
+        if device not in {"vulkan", "cpu"}:
+            raise ValueError(f"{model_name} only runs on llama.cpp. Use --device vulkan or --device cpu.")
+        return _jevk5_agent(model_name, mode=device, quant=quant)
+
     if device in {"vulkan", "cpu"}:
         return _llama_cpp_agent(model_name, mode=device, quant=quant)
 
@@ -356,7 +393,7 @@ def serve(agent, host: str = "127.0.0.1", port: int = 8077, min_confidence: floa
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="Serve TinyJev with llama.cpp (CPU/Vulkan) or legacy torch modes")
+    parser = argparse.ArgumentParser(description="Serve decision models with llama.cpp (CPU/Vulkan) or legacy torch modes")
     parser.add_argument("--model", required=True)
     parser.add_argument("--device", choices=["cpu", "vulkan", "cpu_torch", "gpu"], default="cpu")
     parser.add_argument("--host", default="127.0.0.1")
