@@ -4,11 +4,11 @@ from typing import Any
 import httpx
 from mcp.server.fastmcp import FastMCP
 
-mcp = FastMCP("tinyjev")
+mcp = FastMCP("entschied")
 
 
 def _base_url() -> str:
-    value = os.environ.get("TINYJEV_URL", "http://127.0.0.1:8077").strip()
+    value = os.environ.get("ENTSCHIED_URL", "http://127.0.0.1:8077").strip()
     return value.rstrip("/") or "http://127.0.0.1:8077"
 
 
@@ -27,7 +27,7 @@ def _request_systemone(
         response = httpx.post(url, json=payload, timeout=45)
     except httpx.RequestError as exc:
         raise RuntimeError(
-            f"TinyJev server is not reachable at {base_url}. Start TinyJev Server GUI and click Start."
+            f"Entschied server is not reachable at {base_url}. Start Entschied and click Start."
         ) from exc
 
     if response.status_code >= 400:
@@ -35,16 +35,16 @@ def _request_systemone(
             details = response.json()
         except ValueError:
             details = response.text.strip() or "unknown error"
-        raise RuntimeError(f"TinyJev request failed ({response.status_code}): {details}")
+        raise RuntimeError(f"Entschied request failed ({response.status_code}): {details}")
 
     try:
         data = response.json()
     except ValueError as exc:
-        raise RuntimeError("TinyJev returned non-JSON output.") from exc
+        raise RuntimeError("Entschied returned non-JSON output.") from exc
 
     answers = data.get("answers")
     if not isinstance(answers, dict):
-        raise RuntimeError("TinyJev response did not include an answers object.")
+        raise RuntimeError("Entschied response did not include an answers object.")
     return answers
 
 

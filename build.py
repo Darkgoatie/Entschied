@@ -53,9 +53,9 @@ def find_iscc() -> Path | None:
 def scratch_dir() -> Path:
     tmpdir = os.environ.get("TMPDIR", "").strip()
     if tmpdir:
-        return Path(tmpdir) / "tinyjev_build"
+        return Path(tmpdir) / "entschied_build"
     local_appdata = Path(os.environ.get("LOCALAPPDATA", str(Path.home())))
-    return local_appdata / "hermes" / "cache" / "scratch" / "tinyjev_build"
+    return local_appdata / "hermes" / "cache" / "scratch" / "entschied_build"
 
 
 def _resolve_runtime_dll(name: str) -> Path:
@@ -188,13 +188,13 @@ def main() -> int:
     if dist_dir.exists():
         shutil.rmtree(dist_dir)
 
-    run([str(python), "-m", "PyInstaller", "--noconfirm", "--clean", "TinyJev.spec"], repo)
+    run([str(python), "-m", "PyInstaller", "--noconfirm", "--clean", "Entschied.spec"], repo)
 
-    tinyjev_exe = repo / "dist" / "TinyJev" / "TinyJev.exe"
-    if not tinyjev_exe.exists():
-        raise FileNotFoundError(f"Build did not produce {tinyjev_exe}")
+    app_exe = repo / "dist" / "Entschied" / "Entschied.exe"
+    if not app_exe.exists():
+        raise FileNotFoundError(f"Build did not produce {app_exe}")
 
-    smoke_test_frozen(tinyjev_exe, repo)
+    smoke_test_frozen(app_exe, repo)
 
     iscc = find_iscc()
     if iscc is None:
@@ -203,9 +203,9 @@ def main() -> int:
     if iscc is None:
         raise FileNotFoundError("Inno Setup 6 (ISCC.exe) not found after winget install")
 
-    run([str(iscc), "TinyJevInstaller.iss"], repo)
+    run([str(iscc), "EntschiedInstaller.iss"], repo)
 
-    installer = repo / "dist" / f"TinyJev-Setup-{APP_VERSION}.exe"
+    installer = repo / "dist" / f"Entschied-Setup-{APP_VERSION}.exe"
     if not installer.exists():
         raise FileNotFoundError(f"Installer not found: {installer}")
 

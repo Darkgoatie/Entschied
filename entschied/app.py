@@ -9,14 +9,14 @@ __all__ = ["MainWindow", "main"]
 
 def run_self_test() -> int:
     modules = [
-        "tinyjev_gui.common",
-        "tinyjev_gui.runtime",
-        "tinyjev_gui.gpu_setup",
-        "tinyjev_gui.vulkan_setup",
-        "tinyjev_gui.vulkan_backend",
-        "tinyjev_gui.workers",
-        "tinyjev_gui.serve",
-        "tinyjev_gui.window",
+        "entschied.common",
+        "entschied.runtime",
+        "entschied.gpu_setup",
+        "entschied.vulkan_setup",
+        "entschied.vulkan_backend",
+        "entschied.workers",
+        "entschied.serve",
+        "entschied.window",
     ]
     failures: list[tuple[str, Exception]] = []
     for name in modules:

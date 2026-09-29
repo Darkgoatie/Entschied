@@ -1,4 +1,4 @@
-from tinyjev_gui.app import main
+from entschied.app import main
 
 
 if __name__ == "__main__":

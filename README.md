@@ -1,10 +1,12 @@
-# TinyJev Server GUI
+# Entschied
+
+Run decision-maker AI models (TinyJev) locally.
 
 Desktop app for running a local [TinyJev](https://huggingface.co/AnkitAI/tinyjev-0.6b) server and using it as a fast decision layer.
 
 ## Download
 
-- Installer: `TinyJev-Setup-0.1.0.exe` (Windows 10/11 x64)
+- Installer: `Entschied-Setup-0.1.0.exe` (Windows 10/11 x64)
 - The installer is unsigned. If SmartScreen blocks it, click **More info** then **Run anyway**.
 - First run downloads the TinyJev model files from Hugging Face.
 - The frozen app uses `llama.cpp` for both **GPU (Vulkan)** and **CPU**.
@@ -20,7 +22,7 @@ Use it to route, gate, skip, or choose a model/tool. If TinyJev is not confident
 ```python
 import httpx
 
-TINYJEV_URL = "http://127.0.0.1:8077"
+ENTSCHIED_URL = "http://127.0.0.1:8077"
 
 state = "User says: package never arrived and wants a refund"
 
@@ -40,7 +42,7 @@ payload = {
     },
 }
 
-answer = httpx.post(f"{TINYJEV_URL}/v1/systemone", json=payload, timeout=30).json()["answers"]["route"]
+answer = httpx.post(f"{ENTSCHIED_URL}/v1/systemone", json=payload, timeout=30).json()["answers"]["route"]
 
 if answer["decided"]:
     # local decision path (0 online tokens for this decision)
@@ -101,18 +103,18 @@ Requires Inno Setup 6 (`ISCC.exe`) and the project venv at `.venv`.
 python build.py
 ```
 
-`build.py` builds the frozen app, runs `TinyJev.exe --self-test`, and creates `dist/TinyJev-Setup-0.1.0.exe`.
+`build.py` builds the frozen app, runs `Entschied.exe --self-test`, and creates `dist/Entschied-Setup-0.1.0.exe`.
 
 Run GUI:
 
 ```bash
-tinyjev-gui
+entschied
 ```
 
 or:
 
 ```bash
-python -m tinyjev_gui
+python -m entschied
 ```
 
 ## GPU runtime (DirectML)
@@ -123,33 +125,33 @@ Setup options:
 - Or run:
 
 ```bash
-python -m tinyjev_gui.gpu_setup
+python -m entschied.gpu_setup
 ```
 
 Runtime path:
 
-- `%LOCALAPPDATA%/TinyJev/gpu-runtime`
+- `%LOCALAPPDATA%/Entschied/gpu-runtime`
 
 DirectML is stable only for smaller checkpoints on this iGPU path. Models above ~5.5 GB (for example TinyJev-4B) are blocked in the GUI with a clear message; use Vulkan for those.
 
 Direct server entrypoint:
 
 ```bash
-python -m tinyjev_gui.serve --model TinyJev-0.6B --device gpu --host 127.0.0.1 --port 8091
+python -m entschied.serve --model TinyJev-0.6B --device gpu --host 127.0.0.1 --port 8091
 ```
 
 ## GPU runtime (Vulkan / llama.cpp)
 
-TinyJev Vulkan mode runs the Qwen3 backbone through `llama-server` embeddings (`--embeddings --pooling none`) and keeps the TinyJev pointer head in Python.
+Entschied Vulkan mode runs the Qwen3 backbone through `llama-server` embeddings (`--embeddings --pooling none`) and keeps the TinyJev pointer head in Python.
 
 - Frozen app bundles `llama-server.exe` and required DLLs under `llama/`
-- Override executable: set `TINYJEV_LLAMA_SERVER`
-- From source (non-frozen), if no local executable is found the app can download a Windows Vulkan release into `%LOCALAPPDATA%/TinyJev/llama.cpp`
+- Override executable: set `ENTSCHIED_LLAMA_SERVER`
+- From source (non-frozen), if no local executable is found the app can download a Windows Vulkan release into `%LOCALAPPDATA%/Entschied/llama.cpp`
 - GGUF files are downloaded from:
   - https://huggingface.co/darkgoatie/TinyJev-0.6B-GGUF
   - https://huggingface.co/darkgoatie/TinyJev-4B-GGUF
 - Downloads pull only the selected quant plus support files (`head.safetensors`, `tinyjev.json`, `config.json`, tokenizer files, `README.md`)
-- GGUF files can also live in `TINYJEV_GGUF_DIR` when set
+- GGUF files can also live in `ENTSCHIED_GGUF_DIR` when set
 - Local conversion is optional fallback only (source mode)
 
 In **Models** tab, pick a GGUF quant and click **Download**. In the frozen app, downloads from the GGUF repos are the model path.
@@ -157,13 +159,13 @@ In **Models** tab, pick a GGUF quant and click **Download**. In the frozen app, 
 Direct server entrypoint:
 
 ```bash
-python -m tinyjev_gui.serve --model TinyJev-4B --device vulkan --host 127.0.0.1 --port 8096
+python -m entschied.serve --model TinyJev-4B --device vulkan --host 127.0.0.1 --port 8096
 ```
 
 CPU llama.cpp entrypoint:
 
 ```bash
-python -m tinyjev_gui.serve --model TinyJev-0.6B --device cpu --host 127.0.0.1 --port 8097
+python -m entschied.serve --model TinyJev-0.6B --device cpu --host 127.0.0.1 --port 8097
 ```
 
 ## API
@@ -189,7 +191,7 @@ Behavior:
 Server-wide default cutoff:
 
 ```bash
-python -m tinyjev_gui.serve --model TinyJev-0.6B --device cpu --min-confidence
+python -m entschied.serve --model TinyJev-0.6B --device cpu --min-confidence
 ```
 
 (or pass a value, e.g. `--min-confidence 0.9`)
@@ -199,13 +201,13 @@ python -m tinyjev_gui.serve --model TinyJev-0.6B --device cpu --min-confidence
 Run:
 
 ```bash
-python -m tinyjev_gui.mcp
+python -m entschied.mcp
 ```
 
 Console script:
 
 ```bash
-tinyjev-mcp
+entschied-mcp
 ```
 
 Tools:
@@ -219,18 +221,18 @@ Tool semantics (all four):
 - answers are probabilities
 - branch on `decided` / `defer`
 
-Default TinyJev URL is `http://127.0.0.1:8077`.
-Override with `TINYJEV_URL`.
+Default Entschied URL is `http://127.0.0.1:8077`.
+Override with `ENTSCHIED_URL`.
 
 ## Tray and login behavior
 
 - Closing the window hides it to tray; server keeps running
 - Tray menu: **Show**, **Start/Stop server**, **Quit**
-- **Quit** stops the TinyJev server before exit
+- **Quit** stops the Entschied server before exit
 - Windows **Start app on login** writes:
-  - `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\TinyJevServerGUI`
-  - command while running from source: `.venv\Scripts\pythonw.exe -m tinyjev_gui --minimized`
-  - command in the frozen app: `TinyJev.exe --minimized`
+  - `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\Entschied`
+  - command while running from source: `.venv\Scripts\pythonw.exe -m entschied --minimized`
+  - command in the frozen app: `Entschied.exe --minimized`
 
 ## License
 

@@ -1,21 +1,21 @@
 [project]
-name = "tinyjev-server-gui"
+name = "entschied"
 version = "0.1.0"
-description = "Desktop app to run and test a local TinyJev server"
+description = "Run decision-maker AI models locally"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 dependencies = ["tinyjev[torch]", "PySide6", "httpx", "huggingface_hub", "mcp[cli]<2"]
 
 [project.scripts]
-tinyjev-gui = "tinyjev_gui.app:main"
-tinyjev-mcp = "tinyjev_gui.mcp:main"
-tinyjev-serve = "tinyjev_gui.serve:main"
-tinyjev-gpu-setup = "tinyjev_gui.gpu_setup:main"
+entschied = "entschied.app:main"
+entschied-mcp = "entschied.mcp:main"
+entschied-serve = "entschied.serve:main"
+entschied-gpu-setup = "entschied.gpu_setup:main"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["tinyjev_gui"]
+packages = ["entschied"]

@@ -56,14 +56,14 @@ def local_appdata() -> Path:
 
 
 def gguf_dir() -> Path:
-    override = os.environ.get("TINYJEV_GGUF_DIR", "").strip()
+    override = os.environ.get("ENTSCHIED_GGUF_DIR", "").strip()
     if override:
         return Path(override)
-    return local_appdata() / "TinyJev" / "gguf"
+    return local_appdata() / "Entschied" / "gguf"
 
 
 def llama_dir() -> Path:
-    return local_appdata() / "TinyJev" / "llama.cpp"
+    return local_appdata() / "Entschied" / "llama.cpp"
 
 
 def gguf_targets(model_name: str) -> list[tuple[str, Path]]:
@@ -106,7 +106,7 @@ def resolve_gguf_quant(model_name: str, preferred_quant: str | None = None) -> s
     if preferred_quant:
         wanted.append(preferred_quant)
 
-    env_quant = os.environ.get("TINYJEV_GGUF_QUANT", "").strip()
+    env_quant = os.environ.get("ENTSCHIED_GGUF_QUANT", "").strip()
     if env_quant:
         wanted.append(env_quant)
 
@@ -251,7 +251,7 @@ def preferred_gguf(model_name: str, preferred_quant: str | None = None) -> Path:
     wanted = []
     if preferred_quant:
         wanted.append(preferred_quant)
-    env_quant = os.environ.get("TINYJEV_GGUF_QUANT", "").strip()
+    env_quant = os.environ.get("ENTSCHIED_GGUF_QUANT", "").strip()
     if env_quant:
         wanted.append(env_quant)
     wanted.extend(["f16", "q8_0", "bf16", "f32"])
@@ -415,11 +415,11 @@ def _download_latest_vulkan_release(log: Callable[[str], None]) -> Path:
 def find_llama_server(log: Callable[[str], None] | None = None, auto_download: bool = True) -> Path:
     log = log or _log_default
 
-    env_path = os.environ.get("TINYJEV_LLAMA_SERVER", "").strip()
+    env_path = os.environ.get("ENTSCHIED_LLAMA_SERVER", "").strip()
     if env_path:
         path = Path(env_path)
         if not path.exists():
-            raise FileNotFoundError(f"TINYJEV_LLAMA_SERVER points to missing file: {path}")
+            raise FileNotFoundError(f"ENTSCHIED_LLAMA_SERVER points to missing file: {path}")
         return path
 
     bundled = bundled_llama_server()
@@ -511,8 +511,8 @@ def ensure_convert_tooling(
 ) -> tuple[Path, Path]:
     log = log or _log_default
 
-    env_py = os.environ.get("TINYJEV_CONVERT_PYTHON", "").strip()
-    env_script = os.environ.get("TINYJEV_CONVERT_SCRIPT", "").strip()
+    env_py = os.environ.get("ENTSCHIED_CONVERT_PYTHON", "").strip()
+    env_script = os.environ.get("ENTSCHIED_CONVERT_SCRIPT", "").strip()
     if env_py and env_script:
         py = Path(env_py)
         script = Path(env_script)

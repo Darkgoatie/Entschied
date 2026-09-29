@@ -1,19 +1,19 @@
-#define MyAppName "TinyJev"
+#define MyAppName "Entschied"
 #define MyAppVersion "0.1.0"
 #define MyAppPublisher "Halit Eren Ozkir"
-#define MyAppExeName "TinyJev.exe"
+#define MyAppExeName "Entschied.exe"
 
 [Setup]
 AppId={{2E9348BE-31F2-489A-89EA-AECC9B0E6AFD}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-DefaultDirName={localappdata}\Programs\TinyJev
+DefaultDirName={localappdata}\Programs\Entschied
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=no
 LicenseFile=LICENSE
 OutputDir=dist
-OutputBaseFilename=TinyJev-Setup-0.1.0
+OutputBaseFilename=Entschied-Setup-0.1.0
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
@@ -29,14 +29,14 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
 
 [Files]
-Source: "dist\TinyJev\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "dist\Entschied\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\TinyJev"; Filename: "{app}\{#MyAppExeName}"
-Name: "{autodesktop}\TinyJev"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{autoprograms}\Entschied"; Filename: "{app}\{#MyAppExeName}"
+Name: "{autodesktop}\Entschied"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch TinyJev"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch Entschied"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
 Filename: "{cmd}"; Parameters: "/C reg delete HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v TinyJevServerGUI /f"; Flags: runhidden; RunOnceId: "tinyjev-remove-run-key"

@@ -3,7 +3,7 @@ from pathlib import Path
 
 project_root = Path.cwd()
 llama_dir = project_root / "app" / "llama"
-icon_path = project_root / "assets" / "tinyjev.ico"
+icon_path = project_root / "assets" / "entschied.ico"
 
 llama_datas = []
 if llama_dir.exists():
@@ -19,7 +19,7 @@ block_cipher = None
 
 
 a = Analysis(
-    [str(project_root / "tinyjev_gui" / "__main__.py")],
+    [str(project_root / "entschied" / "__main__.py")],
     pathex=[str(project_root)],
     binaries=[],
     datas=llama_datas + common_datas,
@@ -44,8 +44,8 @@ a = Analysis(
         "torch_directml",
         "transformers",
         "mcp",
-        "tinyjev_gui.mcp",
-        "tinyjev_gui.gpu_backend",
+        "entschied.mcp",
+        "entschied.gpu_backend",
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
@@ -60,7 +60,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="TinyJev",
+    name="Entschied",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -82,5 +82,5 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name="TinyJev",
+    name="Entschied",
 )

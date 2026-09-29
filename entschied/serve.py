@@ -65,8 +65,8 @@ def _llama_cpp_agent(model_name: str, mode: str, quant: str | None = None):
     except Exception:
         gguf_path = preferred_gguf(model_name, preferred_quant=selected_quant)
 
-    host = os.environ.get("TINYJEV_LLAMA_HOST", "127.0.0.1")
-    port = os.environ.get("TINYJEV_LLAMA_PORT", "").strip()
+    host = os.environ.get("ENTSCHIED_LLAMA_HOST", "127.0.0.1")
+    port = os.environ.get("ENTSCHIED_LLAMA_PORT", "").strip()
     handle = LlamaServerHandle.start(
         model_name=model_name,
         gguf_path=gguf_path,
@@ -75,11 +75,11 @@ def _llama_cpp_agent(model_name: str, mode: str, quant: str | None = None):
         mode="cpu" if mode == "cpu" else "vulkan",
     )
 
-    os.environ["TINYJEV_LLAMA_URL"] = handle.base_url
-    os.environ["TINYJEV_LLAMA_MODE"] = "cpu" if mode == "cpu" else "vulkan"
-    os.environ["TINYJEV_MODEL_NAME"] = model_name
-    os.environ["TINYJEV_GGUF_PATH"] = str(gguf_path)
-    os.environ["TINYJEV_GGUF_QUANT"] = selected_quant
+    os.environ["ENTSCHIED_LLAMA_URL"] = handle.base_url
+    os.environ["ENTSCHIED_LLAMA_MODE"] = "cpu" if mode == "cpu" else "vulkan"
+    os.environ["ENTSCHIED_MODEL_NAME"] = model_name
+    os.environ["ENTSCHIED_GGUF_PATH"] = str(gguf_path)
+    os.environ["ENTSCHIED_GGUF_QUANT"] = selected_quant
 
     torch_backend.Qwen3Backbone = LlamaCppQwen3Backbone
 
@@ -342,7 +342,7 @@ def serve(agent, host: str = "127.0.0.1", port: int = 8077, min_confidence: floa
     if min_confidence is not None:
         cutoff_note = f", default min_confidence={min_confidence:.2f}"
     print(
-        f"tinyjev [{agent.name} on {agent.backend}] listening on http://{host}:{port} "
+        f"entschied [{agent.name} on {agent.backend}] listening on http://{host}:{port} "
         f"(POST /predict, POST /v1/systemone{cutoff_note})",
         flush=True,
     )

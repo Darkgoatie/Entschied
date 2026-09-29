@@ -12,7 +12,7 @@ from .runtime import NO_WINDOW
 
 def default_runtime_dir() -> Path:
     base = Path(os.environ.get("LOCALAPPDATA", Path.home()))
-    return base / "TinyJev" / "gpu-runtime"
+    return base / "Entschied" / "gpu-runtime"
 
 
 def runtime_python(runtime_dir: Path) -> Path:
@@ -100,7 +100,7 @@ def ensure_gpu_runtime(
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="Create or update TinyJev DirectML runtime")
+    parser = argparse.ArgumentParser(description="Create or update Entschied DirectML runtime")
     parser.add_argument("--runtime-dir", default=str(default_runtime_dir()))
     parser.add_argument("--repo-root", default=str(Path(__file__).resolve().parents[1]))
     args = parser.parse_args(argv)

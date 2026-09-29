@@ -202,17 +202,17 @@ class LlamaServerHandle:
         if not model_path.exists():
             raise FileNotFoundError(f"Missing GGUF: {model_path}")
 
-        selected_port = int(port or os.environ.get("TINYJEV_LLAMA_PORT", "0") or 0)
+        selected_port = int(port or os.environ.get("ENTSCHIED_LLAMA_PORT", "0") or 0)
         if selected_port <= 0:
             selected_port = _find_free_port(host)
 
-        ctx_size = int(os.environ.get("TINYJEV_LLAMA_CTX", "8192"))
-        batch = int(os.environ.get("TINYJEV_LLAMA_BATCH", str(ctx_size)))
+        ctx_size = int(os.environ.get("ENTSCHIED_LLAMA_CTX", "8192"))
+        batch = int(os.environ.get("ENTSCHIED_LLAMA_BATCH", str(ctx_size)))
 
         if mode == "cpu":
-            ngl = int(os.environ.get("TINYJEV_LLAMA_NGL", "0"))
+            ngl = int(os.environ.get("ENTSCHIED_LLAMA_NGL", "0"))
         else:
-            ngl = int(os.environ.get("TINYJEV_LLAMA_NGL", "99"))
+            ngl = int(os.environ.get("ENTSCHIED_LLAMA_NGL", "99"))
 
         cmd = [
             str(executable),
@@ -297,15 +297,15 @@ class LlamaCppQwen3Backbone:
         self.prefix_min_tokens = prefix_min_tokens
         self._owned_server: LlamaServerHandle | None = None
 
-        base_url = os.environ.get("TINYJEV_LLAMA_URL", "").strip()
-        mode = os.environ.get("TINYJEV_LLAMA_MODE", "vulkan").strip().lower()
+        base_url = os.environ.get("ENTSCHIED_LLAMA_URL", "").strip()
+        mode = os.environ.get("ENTSCHIED_LLAMA_MODE", "vulkan").strip().lower()
         if mode not in {"vulkan", "cpu"}:
             mode = "vulkan"
 
         if base_url:
             self.base_url = base_url.rstrip("/")
         else:
-            model_name = os.environ.get("TINYJEV_MODEL_NAME", "TinyJev-0.6B")
+            model_name = os.environ.get("ENTSCHIED_MODEL_NAME", "TinyJev-0.6B")
             server = get_or_start_shared_server(model_name=model_name, mode=mode)
             self._owned_server = server
             self.base_url = server.base_url
@@ -332,7 +332,7 @@ class LlamaCppQwen3Backbone:
             pass
 
         owned = self._owned_server
-        if owned and os.environ.get("TINYJEV_LLAMA_URL", "").strip() == "":
+        if owned and os.environ.get("ENTSCHIED_LLAMA_URL", "").strip() == "":
             stop_shared_server()
             self._owned_server = None
 

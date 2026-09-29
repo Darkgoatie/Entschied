@@ -162,7 +162,7 @@ def load_cost_module(calc_path: Path):
 
 
 def tool_schema_tokens(count_tokens):
-    from tinyjev_gui.mcp import mcp
+    from entschied.mcp import mcp
 
     async def _inner():
         tools = await mcp.list_tools()
@@ -337,12 +337,12 @@ def main():
     parser.add_argument(
         "--approach-script",
         type=Path,
-        default=Path("C:/Users/halit/AppData/Local/hermes/cache/scratch/tinyjev_approach_bench.py"),
+        default=Path("C:/Users/halit/AppData/Local/hermes/cache/scratch/entschied_approach_bench.py"),
     )
     parser.add_argument(
         "--dev-script",
         type=Path,
-        default=Path("C:/Users/halit/AppData/Local/hermes/cache/scratch/tinyjev_dev_bench.py"),
+        default=Path("C:/Users/halit/AppData/Local/hermes/cache/scratch/entschied_dev_bench.py"),
     )
     parser.add_argument("--include-dev", action="store_true", default=True)
     parser.add_argument(
@@ -358,21 +358,21 @@ def main():
     parser.add_argument(
         "--rows-out",
         type=Path,
-        default=Path("C:/Users/halit/Desktop/Projects/TinyJev-Server-GUI/benchmarks/token-savings-0.6b-rows.json"),
+        default=Path("benchmarks/token-savings-0.6b-rows.json"),
     )
     parser.add_argument(
         "--summary-out",
         type=Path,
-        default=Path("C:/Users/halit/Desktop/Projects/TinyJev-Server-GUI/benchmarks/token-savings-0.6b-summary.json"),
+        default=Path("benchmarks/token-savings-0.6b-summary.json"),
     )
     parser.add_argument(
         "--html-out",
         type=Path,
-        default=Path("C:/Users/halit/Desktop/Projects/TinyJev-Server-GUI/benchmarks/token-savings-0.6b.html"),
+        default=Path("benchmarks/token-savings-0.6b.html"),
     )
     parser.add_argument(
         "--python",
-        default="C:/Users/halit/Desktop/Projects/TinyJev-Server-GUI/.venv/Scripts/python.exe",
+        default=".venv/Scripts/python.exe",
     )
 
     args = parser.parse_args()

@@ -51,7 +51,7 @@ try:
 except Exception:
     def default_runtime_dir() -> Path:
         base = Path.home()
-        return base / "AppData" / "Local" / "TinyJev" / "gpu-runtime"
+        return base / "AppData" / "Local" / "Entschied" / "gpu-runtime"
 
     def runtime_python(runtime_dir: Path) -> Path:
         return runtime_dir / "Scripts" / "python.exe"
@@ -157,10 +157,10 @@ class SingleInstanceBridge(QObject):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("TinyJev Server")
+        self.setWindowTitle("Entschied")
         self.resize(1050, 740)
 
-        self.settings = QSettings("TinyJev", "TinyJev-Server-GUI")
+        self.settings = QSettings("Entschied", "Entschied")
 
         self.model_entries = self.load_model_entries()
         self.model_by_name = {entry.name: entry for entry in self.model_entries}
@@ -549,7 +549,7 @@ class MainWindow(QMainWindow):
         pythonw_path = Path(self.project_venv_python()).with_name("pythonw.exe")
         if not pythonw_path.exists():
             pythonw_path = Path(self.project_venv_python())
-        return f'"{pythonw_path}" -m tinyjev_gui --minimized'
+        return f'"{pythonw_path}" -m entschied --minimized'
 
     def startup_command_executable(self, command):
         raw = str(command or "").strip()
@@ -594,7 +594,7 @@ class MainWindow(QMainWindow):
             return False
         if is_frozen_app():
             return "--minimized" in str(command)
-        return "-m tinyjev_gui" in str(command)
+        return "-m entschied" in str(command)
 
     def start_on_login_enabled(self):
         if not sys.platform.startswith("win"):
@@ -603,7 +603,7 @@ class MainWindow(QMainWindow):
             import winreg
 
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\\Microsoft\\Windows\\CurrentVersion\\Run") as key:
-                value, _ = winreg.QueryValueEx(key, "TinyJevServerGUI")
+                value, _ = winreg.QueryValueEx(key, "Entschied")
         except OSError:
             return False
 
@@ -625,10 +625,10 @@ class MainWindow(QMainWindow):
 
             with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\\Microsoft\\Windows\\CurrentVersion\\Run") as key:
                 if enabled:
-                    winreg.SetValueEx(key, "TinyJevServerGUI", 0, winreg.REG_SZ, self.startup_command())
+                    winreg.SetValueEx(key, "Entschied", 0, winreg.REG_SZ, self.startup_command())
                 else:
                     try:
-                        winreg.DeleteValue(key, "TinyJevServerGUI")
+                        winreg.DeleteValue(key, "Entschied")
                     except FileNotFoundError:
                         pass
             return True, ""
@@ -659,7 +659,7 @@ class MainWindow(QMainWindow):
         self.tray_quit_action.triggered.connect(self.quit_from_tray)
 
         self.tray_icon = QSystemTrayIcon(tray_icon, self)
-        self.tray_icon.setToolTip("TinyJev Server")
+        self.tray_icon.setToolTip("Entschied")
         self.tray_icon.setContextMenu(self.tray_menu)
         self.tray_icon.activated.connect(self.tray_activated)
         self.tray_icon.show()
@@ -696,7 +696,7 @@ class MainWindow(QMainWindow):
         text = ", ".join(labels)
         answer = QMessageBox.question(
             self,
-            "Quit TinyJev Server",
+            "Quit Entschied",
             f"{text} is still running. Quit anyway?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
@@ -1312,7 +1312,7 @@ class MainWindow(QMainWindow):
                 self.log.appendPlainText(f"llama.cpp backend: {server_path}")
             except Exception:
                 if is_frozen_app():
-                    message = "Bundled llama.cpp runtime is missing. Reinstall TinyJev."
+                    message = "Bundled llama.cpp runtime is missing. Reinstall Entschied."
                     self.log.appendPlainText(message)
                     self.status.setText(message)
                     QMessageBox.warning(self, "llama.cpp runtime", message)
@@ -1411,7 +1411,7 @@ class MainWindow(QMainWindow):
             args = [
                 "-u",
                 "-m",
-                "tinyjev_gui.serve",
+                "entschied.serve",
                 "--model",
                 model_name,
                 "--device",
@@ -2278,7 +2278,7 @@ def main(argv=None):
 
     username = getpass.getuser().strip() or "user"
     safe_username = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in username)
-    instance_name = f"TinyJevServerGUI-{safe_username}"
+    instance_name = f"Entschied-{safe_username}"
     if SingleInstanceBridge.send_message(instance_name, "show"):
         return 0
 
@@ -2288,7 +2288,7 @@ def main(argv=None):
     window = MainWindow()
     bridge = SingleInstanceBridge(instance_name, window.handle_single_instance_message, parent=window)
     if not bridge.listen():
-        QMessageBox.warning(window, "Startup error", "TinyJev Server is already running.")
+        QMessageBox.warning(window, "Startup error", "Entschied is already running.")
         return 1
     window.single_instance_bridge = bridge
 
