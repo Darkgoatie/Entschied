@@ -1833,6 +1833,7 @@ class MainWindow(QMainWindow):
                     path = Path(cached)
                     if path.exists():
                         current_size += path.stat().st_size
+            current_size += self.incomplete_bytes(repo_id)
         else:
             _, folder = self.find_cached_repo(repo_id, repo_map)
             current_size = self.folder_size(folder)
@@ -1842,11 +1843,38 @@ class MainWindow(QMainWindow):
         previous_time = float(self.download_state.get("updated_at", now))
 
         if current_size > previous_size:
-            delta_t = max(now - previous_time, 1e-3)
-            self.download_state["speed"] = (current_size - previous_size) / delta_t
             self.download_state["downloaded"] = current_size
 
         self.download_state["updated_at"] = now
+        self.show_download_info()
+
+    def incomplete_bytes(self, repo_id):
+        from huggingface_hub import constants as hf_constants
+
+        folder = Path(hf_constants.HF_HUB_CACHE) / ("models--" + repo_id.replace("/", "--")) / "blobs"
+        total = 0
+        try:
+            for item in folder.glob("*.incomplete"):
+                total += item.stat().st_size
+        except OSError:
+            pass
+        return total
+
+    def show_download_info(self):
+        state = self.download_state or {}
+        if not state or self.download_worker is None:
+            return
+        model_name = state.get("model", "")
+        downloaded = int(state.get("downloaded", 0))
+        total = int(state.get("total", 0))
+        speed = float(state.get("speed", 0.0) or 0.0)
+        speed_part = f" • {human_size(speed)}/s" if speed > 0 else ""
+        if total > 0:
+            self.download_bar.setValue(max(0, min(100, int(downloaded * 100 / total))))
+            text = f"Downloading {model_name}: {human_size(downloaded)} / {human_size(total)}{speed_part}"
+        else:
+            text = f"Downloading {model_name}: {human_size(downloaded)}{speed_part}"
+        self.download_info.setText(text)
 
     def revision_note(self, repo_info):
         revisions = getattr(repo_info, "revisions", None) or []
@@ -2112,9 +2140,11 @@ class MainWindow(QMainWindow):
         self.refresh_model_table()
 
     def download_progress(self, model_name, downloaded, total, speed):
-        downloaded = int(downloaded or 0)
-        total = int(total or 0)
         prior = self.download_state or {}
+        downloaded = max(int(downloaded or 0), int(prior.get("downloaded", 0)) if prior.get("model") == model_name else 0)
+        total = int(total or 0)
+        if not speed and prior.get("model") == model_name:
+            speed = float(prior.get("speed", 0.0) or 0.0)
         self.download_state = {
             "model": model_name,
             "repo_id": prior.get("repo_id", ""),

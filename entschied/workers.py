@@ -156,31 +156,31 @@ class DownloadWorker(QThread):
 
             class ProgressTqdm(tqdm):
                 def __init__(self, *args, **kwargs):
+                    # a disabled tqdm ignores update(), so bytes are counted here; huggingface_hub
+                    # reports every chunk to both a "Downloading bytes" and a "Reconstructing" bar
+                    self._counts = kwargs.get("unit") == "B" and not str(kwargs.get("desc", "")).startswith("Downloading")
+                    kwargs.pop("name", None)
                     kwargs["disable"] = True
                     super().__init__(*args, **kwargs)
 
                 def update(self, n=1):
                     if cancel_event.is_set():
                         raise RuntimeError("DOWNLOAD_CANCELLED")
-                    before = self.n
-                    result = super().update(n)
-                    delta = int(self.n - before)
-                    # snapshot_download also runs a "Fetching N files" bar counted in files, not bytes
-                    if delta > 0 and getattr(self, "unit", "it") == "B":
+                    delta = int(n or 0)
+                    if delta > 0 and self._counts:
                         outer._downloaded_delta += delta
                         now = time.monotonic()
-                        window.append((now, outer._downloaded_delta))
-                        while len(window) > 2 and now - window[0][0] > 3.0:
-                            window.pop(0)
+                        if not window:
+                            window.append((now, 0))
                         span = now - window[0][0]
-                        rate = (outer._downloaded_delta - window[0][1]) / span if span > 0.2 else 0.0
+                        rate = outer._downloaded_delta / span if span > 1.0 else 0.0
                         outer.progress.emit(
                             outer.model_name,
                             outer.initial_bytes + outer._downloaded_delta,
                             total_bytes,
                             float(rate),
                         )
-                    return result
+                    return None
 
             snapshot_download(
                 repo_id=self.repo_id,
